@@ -271,11 +271,11 @@ export default function IntegrityAudit({ relationships, entities }: IntegrityAud
               {/* Header Relación */}
               <div className="p-8 border-b border-slate-50 bg-slate-50/20 flex flex-col md:flex-row md:items-center justify-between gap-6">
                 <div className="flex items-center gap-6">
-                   <div className="w-14 h-14 bg-white border-2 border-[#1E3A8A]/10 rounded-2xl flex items-center justify-center text-[#1E3A8A] shadow-sm transform group-hover:scale-110 transition-transform">
+                   <div className="w-14 h-14 bg-white border-2 border-[#0C1E4F]/10 rounded-2xl flex items-center justify-center text-[#0C1E4F] shadow-sm transform group-hover:scale-110 transition-transform">
                      <Network size={28} />
                    </div>
                    <div>
-                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Conexión establecida por: <span className="text-[#1E3A8A]">{rel.parent_attr?.name} = {rel.child_attr?.name}</span></p>
+                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Conexión establecida por: <span className="text-[#0C1E4F]">{rel.parent_attr?.name} = {rel.child_attr?.name}</span></p>
                      <p className="text-2xl font-black text-slate-900 italic tracking-tight">
                        {res.parentEntityName} <span className="text-slate-300 mx-3 font-normal">↔</span> {res.childEntityName}
                      </p>
@@ -283,7 +283,7 @@ export default function IntegrityAudit({ relationships, entities }: IntegrityAud
                 </div>
                 <div className="flex items-center gap-4">
                   {auditProgress[`${rel.id}-parent`] || auditProgress[`${rel.id}-child`] ? (
-                    <div className="flex items-center gap-2 text-[10px] font-black text-[#1E3A8A] animate-pulse">
+                    <div className="flex items-center gap-2 text-[10px] font-black text-[#0C1E4F] animate-pulse">
                       <Database size={12} />
                       {auditProgress[`${rel.id}-parent`] || auditProgress[`${rel.id}-child`]}
                     </div>
@@ -298,7 +298,7 @@ export default function IntegrityAudit({ relationships, entities }: IntegrityAud
                 <div className="p-10 space-y-8 bg-white">
                   <div className="flex justify-between items-center">
                     <h5 className="text-[12px] font-black text-slate-900 uppercase tracking-tighter flex items-center gap-2">
-                       <span className="text-[#1E3A8A] truncate max-w-[120px]">{res.parentEntityName}</span>
+                       <span className="text-[#0C1E4F] truncate max-w-[120px]">{res.parentEntityName}</span>
                        <ArrowRight size={14} className="text-slate-300" />
                        <span className="text-slate-400 truncate max-w-[120px]">{res.childEntityName}</span>
                     </h5>
@@ -334,7 +334,7 @@ export default function IntegrityAudit({ relationships, entities }: IntegrityAud
                 <div className="p-10 space-y-8 bg-slate-50/30">
                   <div className="flex justify-between items-center">
                     <h5 className="text-[12px] font-black text-slate-900 uppercase tracking-tighter flex items-center gap-2">
-                       <span className="text-[#1E3A8A] truncate max-w-[120px]">{res.childEntityName}</span>
+                       <span className="text-[#0C1E4F] truncate max-w-[120px]">{res.childEntityName}</span>
                        <ArrowRight size={14} className="text-slate-300" />
                        <span className="text-slate-400 truncate max-w-[120px]">{res.parentEntityName}</span>
                     </h5>
@@ -407,7 +407,7 @@ export default function IntegrityAudit({ relationships, entities }: IntegrityAud
                           }}
                           className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase whitespace-nowrap transition-all border ${
                             !hiddenColumns.has(col) 
-                              ? 'bg-[#1E3A8A]/10 text-[#1E3A8A] border-[#1E3A8A]/20' 
+                              ? 'bg-[#0C1E4F]/10 text-[#0C1E4F] border-[#0C1E4F]/20' 
                               : 'bg-white text-slate-300 border-slate-100 hover:border-slate-200'
                           }`}
                         >
@@ -453,7 +453,7 @@ export default function IntegrityAudit({ relationships, entities }: IntegrityAud
                            <button onClick={() => {
                              if (selectedRecords.size === selectedOrphanView.orphans.length) setSelectedRecords(new Set());
                              else setSelectedRecords(new Set(selectedOrphanView.orphans.map(r => r.__record_id)));
-                           }} className="text-slate-300 hover:text-[#1E3A8A]">
+                           }} className="text-slate-300 hover:text-[#0C1E4F]">
                              {selectedRecords.size === selectedOrphanView.orphans.length ? <CheckSquare size={16} /> : <Square size={16} />}
                            </button>
                          </th>
@@ -487,7 +487,7 @@ export default function IntegrityAudit({ relationships, entities }: IntegrityAud
                                         if (e.key === 'Enter') handleSaveCell();
                                         if (e.key === 'Escape') setEditingCell(null);
                                       }}
-                                      className="w-full h-full px-2 border-2 border-[#1E3A8A] rounded-lg text-xs font-bold focus:outline-none"
+                                      className="w-full h-full px-2 border-2 border-[#0C1E4F] rounded-lg text-xs font-bold focus:outline-none"
                                     />
                                   </div>
                                 ) : (
@@ -507,7 +507,7 @@ export default function IntegrityAudit({ relationships, entities }: IntegrityAud
                     <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center text-blue-700">
                       <Check size={40} />
                     </div>
-                    <p className="text-[#1E3A8A] font-black italic text-xl">Sin huérfanos detectados</p>
+                    <p className="text-[#0C1E4F] font-black italic text-xl">Sin huérfanos detectados</p>
                     <p className="text-slate-400 text-sm font-bold">¡Integridad total en esta dirección!</p>
                  </div>
                )}

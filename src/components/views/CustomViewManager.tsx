@@ -122,7 +122,7 @@ export default function CustomViewManager({ entities, customViews, onRefresh, Em
               placeholder="Buscar vistas..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl text-[11px] font-bold outline-none focus:border-[#1E3A8A]"
+              className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl text-[11px] font-bold outline-none focus:border-brand-electric"
             />
           </div>
         </div>
@@ -148,7 +148,7 @@ export default function CustomViewManager({ entities, customViews, onRefresh, Em
                     {entities.find(e => e.id === view.entity_id)?.name || 'Tabla no encontrada'}
                   </p>
                 </div>
-                <ChevronRight size={16} className={editingView?.id === view.id ? 'text-[#1E3A8A]' : 'text-slate-200'} />
+                <ChevronRight size={16} className={editingView?.id === view.id ? 'text-[#0C1E4F]' : 'text-slate-200'} />
               </button>
               <button 
                 onClick={(e) => { e.stopPropagation(); handleDelete(view.id); }}
@@ -170,7 +170,7 @@ export default function CustomViewManager({ entities, customViews, onRefresh, Em
                 <h3 className="text-4xl font-black italic text-slate-900 tracking-tight">
                   {editingView ? 'Editar Vista Maestra' : 'Nueva Vista Maestra'}
                 </h3>
-                <p className="text-[10px] font-black text-[#1E3A8A] uppercase tracking-[0.3em] mt-3 italic">Configuración de Origen de Datos</p>
+                <p className="text-[10px] font-black text-[#0C1E4F] uppercase tracking-[0.3em] mt-3 italic">Configuración de Origen de Datos</p>
               </div>
               <div className="flex gap-4">
                 <button onClick={() => setIsCreating(false)} className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Cancelar</button>
@@ -190,7 +190,7 @@ export default function CustomViewManager({ entities, customViews, onRefresh, Em
                     value={formData.name}
                     onChange={e => setFormData({ ...formData, name: e.target.value })}
                     placeholder="Ej: Log de Suministros, Control de Calidad..."
-                    className="w-full p-5 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none focus:border-[#1E3A8A] transition-all"
+                    className="w-full p-5 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none focus:border-brand-electric transition-all"
                   />
                 </div>
 
@@ -199,7 +199,7 @@ export default function CustomViewManager({ entities, customViews, onRefresh, Em
                   <select 
                     value={formData.entity_id}
                     onChange={e => setFormData({ ...formData, entity_id: e.target.value, columns: [] })}
-                    className="w-full p-5 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none focus:border-[#1E3A8A] transition-all appearance-none"
+                    className="w-full p-5 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none focus:border-brand-electric transition-all appearance-none"
                   >
                     <option value="">Seleccionar base de datos...</option>
                     {entities.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
@@ -211,7 +211,7 @@ export default function CustomViewManager({ entities, customViews, onRefresh, Em
                   <select 
                     value={formData.filter_key}
                     onChange={e => setFormData({ ...formData, filter_key: e.target.value })}
-                    className="w-full p-5 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none focus:border-[#1E3A8A] transition-all appearance-none"
+                    className="w-full p-5 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none focus:border-brand-electric transition-all appearance-none"
                   >
                     <option value="">Ninguno (Mostrar todo)</option>
                     {formData.columns.map(c => <option key={c} value={c}>Filtrar por {c}</option>)}
@@ -226,7 +226,7 @@ export default function CustomViewManager({ entities, customViews, onRefresh, Em
               <div className="p-10 bg-white rounded-[3rem] border border-slate-100 shadow-sm flex flex-col h-full">
                 <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-8 flex justify-between">
                   <span>Columnas de la Vista</span>
-                  <span className="text-[#1E3A8A]">{formData.columns.length} Seleccionadas</span>
+                  <span className="text-[#0C1E4F]">{formData.columns.length} Seleccionadas</span>
                 </label>
                 
                 {!selectedEntity ? (
@@ -246,7 +246,7 @@ export default function CustomViewManager({ entities, customViews, onRefresh, Em
                             isSelected ? 'bg-slate-900 border-slate-900 text-white shadow-lg' : 'bg-slate-50 border-slate-100 text-slate-500 hover:bg-slate-100'
                           }`}
                         >
-                          {isSelected ? <CheckSquare size={16} className="text-[#1E3A8A]" /> : <Square size={16} />}
+                          {isSelected ? <CheckSquare size={16} className="text-[#0C1E4F]" /> : <Square size={16} />}
                           <span className="text-[11px] font-black uppercase tracking-tight">{attr.name}</span>
                         </button>
                       );
@@ -260,7 +260,7 @@ export default function CustomViewManager({ entities, customViews, onRefresh, Em
             {formData.entity_id && formData.columns.length > 0 && (
               <div className="space-y-6">
                 <div className="flex items-center gap-3">
-                  <div className="h-4 w-1 bg-[#1E3A8A] rounded-full" />
+                  <div className="h-4 w-1 bg-[#0C1E4F] rounded-full" />
                   <h5 className="text-sm font-black italic uppercase text-slate-800 tracking-widest">Previsualización de la Vista</h5>
                 </div>
                 <div className="bg-white p-10 rounded-[3rem] border-2 border-slate-100 shadow-xl overflow-hidden min-h-[400px]">

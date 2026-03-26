@@ -110,7 +110,7 @@ const EmbeddedView = ({ viewName, filterValue, customViews, title, entities = []
         <Database size={28} className="text-slate-200" />
         <div>
           <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Vista no configurada: {viewName}</p>
-          <select className="mt-2 w-full p-3 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold outline-none focus:border-[#1E3A8A]" onChange={e => setSelectedEntityId(e.target.value)} value={selectedEntityId || ''}>
+          <select className="mt-2 w-full p-3 bg-brand-cloud border border-white/50 rounded-xl text-xs font-bold outline-none focus:border-brand-electric transition-all" onChange={e => setSelectedEntityId(e.target.value)} value={selectedEntityId || ''}>
             <option value="">Seleccionar base de datos...</option>
             {entities.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
           </select>
@@ -129,7 +129,7 @@ const EmbeddedView = ({ viewName, filterValue, customViews, title, entities = []
           </p>
         </div>
         {!isAdding && !isCompact && (
-          <button onClick={() => setIsAdding(true)} className="px-4 py-2 bg-[#1E3A8A] text-white rounded-xl text-[10px] font-black uppercase flex items-center gap-1.5 hover:bg-[#1E40AF] transition-all shadow-md print:hidden">
+          <button onClick={() => setIsAdding(true)} className="px-4 py-2 bg-brand-deep text-white rounded-xl text-[10px] font-black uppercase flex items-center gap-1.5 hover:bg-brand-electric transition-all shadow-lg shadow-brand-deep/20 print:hidden border border-white/10">
             <Plus size={13} /> Agregar
           </button>
         )}
@@ -139,8 +139,8 @@ const EmbeddedView = ({ viewName, filterValue, customViews, title, entities = []
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {(view.columns || []).map((col: string) => (
               <div key={col}>
-                <label className="block text-[9px] uppercase font-black text-slate-400 mb-1.5 tracking-widest">{col}</label>
-                <input type="text" value={newRow[col] || ''} onChange={e => setNewRow({ ...newRow, [col]: e.target.value })} className="w-full text-xs p-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:border-[#1E3A8A]" />
+                <label className="block text-[9px] uppercase font-black text-brand-slate/60 mb-1.5 tracking-widest">{col}</label>
+                <input type="text" value={newRow[col] || ''} onChange={e => setNewRow({ ...newRow, [col]: e.target.value })} className="w-full text-xs p-2.5 bg-white border border-brand-cloud rounded-xl outline-none focus:border-brand-electric transition-all" />
               </div>
             ))}
           </div>
@@ -332,12 +332,13 @@ export default function Home() {
   const targetEntity = pendingConnection ? entities.find(e => e.id === pendingConnection.target) : null;
 
   return (
-    <main className="flex h-screen bg-[#F8FAFC] text-slate-900 font-sans overflow-hidden">
+    <main className="flex h-screen bg-brand-cloud text-brand-slate font-sans overflow-hidden">
       <Sidebar activeTab={activeTab} onTabChange={setActiveTab} />
 
       <section className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center px-8 shadow-sm z-10 shrink-0">
-          <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest">
+        <header className="h-16 bg-white/70 backdrop-blur-xl border-b border-white/50 flex items-center px-8 shadow-sm z-10 shrink-0">
+          <h2 className="text-xs font-black text-brand-deep/40 uppercase tracking-widest flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-brand-electric animate-pulse" />
             {activeTab.replace('-', ' ').toUpperCase()}
           </h2>
         </header>
@@ -356,7 +357,7 @@ export default function Home() {
                     placeholder="Buscar CWP, disciplina..."
                     value={cwpSearch}
                     onChange={e => setCwpSearch(e.target.value)}
-                    className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:border-[#1E3A8A] shadow-sm"
+                    className="w-full pl-11 pr-4 py-3 bg-white border border-brand-cloud rounded-2xl text-xs font-bold outline-none focus:border-brand-electric shadow-lg shadow-brand-deep/5 transition-all"
                   />
                   {cwpSearch && (
                     <button onClick={() => setCwpSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500">
@@ -376,9 +377,9 @@ export default function Home() {
                 return (
                   <div key={discipline} className="mb-8">
                     <div className="flex items-center gap-3 mb-3">
-                      <div className="h-4 w-1 bg-[#1E3A8A] rounded-full" />
-                      <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest">{discipline}</h3>
-                      <span className="text-[9px] text-slate-300 font-bold">({disciplineCwps.length})</span>
+                      <div className="h-4 w-1 bg-brand-electric rounded-full shadow-[0_0_8px_rgba(0,191,255,0.5)]" />
+                      <h3 className="text-xs font-black text-brand-deep/60 uppercase tracking-widest">{discipline}</h3>
+                      <span className="text-[9px] text-brand-slate/30 font-bold">({disciplineCwps.length})</span>
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                       {disciplineCwps.map((cwp: any) => {
@@ -387,14 +388,17 @@ export default function Home() {
                           <div
                             key={cwp.name}
                             onClick={() => setSelectedCWP(cwp)}
-                            className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-md cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all group"
+                            className="bg-white/80 backdrop-blur-md p-5 rounded-[2rem] border border-white shadow-lg shadow-brand-deep/5 cursor-pointer hover:shadow-2xl hover:scale-[1.02] hover:border-brand-electric/30 transition-all group relative overflow-hidden"
                           >
-                            <h5 className="text-sm font-black text-slate-900 truncate group-hover:text-[#1E3A8A] transition-colors">{cwp.name}</h5>
+                            <div className="absolute top-0 right-0 p-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <ArrowRight size={14} className="text-brand-electric" />
+                            </div>
+                            <h5 className="text-sm font-black text-brand-deep truncate group-hover:text-brand-electric transition-colors">{cwp.name}</h5>
                             <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-1">{cwp.activities} Act.</p>
                             {globalViewCount > 0 && (
                               <div className="mt-2 flex items-center gap-1">
-                                <Layout size={9} className="text-[#1E3A8A]" />
-                                <span className="text-[9px] font-black text-[#1E3A8A]">{globalViewCount} vistas</span>
+                                <Layout size={9} className="text-brand-electric" />
+                                <span className="text-[9px] font-black text-brand-electric">{globalViewCount} vistas</span>
                               </div>
                             )}
                           </div>
@@ -430,7 +434,7 @@ export default function Home() {
                       placeholder="Nombre de la tabla..."
                       value={newEntityName}
                       onChange={e => setNewEntityName(e.target.value)}
-                      className="w-full p-3 bg-slate-50 border border-slate-100 rounded-xl text-sm font-bold outline-none focus:border-[#1E3A8A]"
+                      className="w-full p-3 bg-slate-50 border border-slate-100 rounded-xl text-sm font-bold outline-none focus:border-brand-electric"
                     />
                     <button onClick={handleSaveIngestion} disabled={isUploading} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-3">
                       {isUploading ? <><Loader2 className="animate-spin" size={18} />Guardando...</> : <><Upload size={18} />Guardar Datos</>}
@@ -459,7 +463,7 @@ export default function Home() {
           {activeTab === 'modeling' && (
             <div className="p-6 h-[calc(100vh-64px)]">
               <div className="mb-4 p-4 bg-white rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
-                <Network size={16} className="text-[#1E3A8A]" />
+                <Network size={16} className="text-[#0C1E4F]" />
                 <p className="text-xs font-bold text-slate-500">
                   Arrastra desde el handle de un nodo hacia otro para crear una conexión. Puedes seleccionar exactamente qué columnas conectar.
                 </p>
@@ -546,7 +550,7 @@ export default function Home() {
       {selectedCWP && (
         <div className="fixed inset-0 z-[100] bg-white flex flex-col animate-in slide-in-from-right duration-300">
           {/* Header */}
-          <div className="h-16 bg-slate-900 flex items-center justify-between px-8 shadow-xl text-white shrink-0">
+          <div className="h-16 bg-brand-deep flex items-center justify-between px-8 shadow-2xl text-white shrink-0 border-b border-white/5">
             <div className="flex items-center gap-5">
               <button onClick={() => setSelectedCWP(null)} className="p-2.5 bg-white/10 rounded-xl hover:bg-white/20 transition-all">
                 <X size={18} />
@@ -568,7 +572,7 @@ export default function Home() {
             {/* Sidebar izquierdo: stats + notas */}
             <div className="w-72 bg-slate-50 border-r border-slate-200 flex flex-col p-6 space-y-5 overflow-y-auto shrink-0">
               {/* Stats */}
-              <div className="bg-white rounded-[2rem] border border-slate-100 p-5 space-y-3">
+              <div className="bg-white/80 backdrop-blur-md rounded-[2rem] border border-white p-5 space-y-3 shadow-xl shadow-brand-deep/5">
                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Resumen</p>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -581,7 +585,7 @@ export default function Home() {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-bold text-slate-500">Vistas activas</span>
-                    <span className="text-sm font-black text-[#1E3A8A]">{getCwpViews().length}</span>
+                    <span className="text-sm font-black text-brand-electric">{getCwpViews().length}</span>
                   </div>
                 </div>
               </div>
@@ -589,15 +593,15 @@ export default function Home() {
               {/* Notas */}
               <div className="bg-white rounded-[2rem] border border-slate-100 p-5 space-y-3 flex flex-col">
                 <div className="flex items-center gap-2">
-                  <StickyNote size={12} className="text-[#1E3A8A]" />
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Notas del CWP</p>
+                  <StickyNote size={12} className="text-brand-electric" />
+                  <p className="text-[9px] font-black text-brand-slate/40 uppercase tracking-widest">Notas del CWP</p>
                 </div>
                 <textarea
                   value={cwpNotes[selectedCWP.name] || ''}
                   onChange={e => setCwpNotes(prev => ({ ...prev, [selectedCWP.name]: e.target.value }))}
                   placeholder="Agrega notas, observaciones, pendientes..."
                   rows={6}
-                  className="w-full p-3 bg-slate-50 border border-slate-100 rounded-xl text-xs font-medium outline-none focus:border-[#1E3A8A] resize-none transition-all"
+                  className="w-full p-3 bg-brand-cloud border border-brand-cloud rounded-xl text-xs font-medium outline-none focus:border-brand-electric resize-none transition-all"
                 />
                 <p className="text-[8px] text-slate-300 font-bold italic">Guardado automáticamente</p>
               </div>
@@ -625,7 +629,7 @@ export default function Home() {
                   <div className="max-w-sm">
                     <p className="text-xl font-black italic text-slate-700 mb-2">Sin vistas configuradas</p>
                     <p className="text-sm text-slate-400 font-bold italic">
-                      Crea vistas personalizadas con un filtro activo en el módulo <span className="text-[#1E3A8A] font-black">Vistas Personalizadas</span>. Aparecerán aquí automáticamente para todos los CWPs.
+                      Crea vistas personalizadas con un filtro activo en el módulo <span className="text-[#0C1E4F] font-black">Vistas Personalizadas</span>. Aparecerán aquí automáticamente para todos los CWPs.
                     </p>
                   </div>
                 </div>
@@ -633,7 +637,7 @@ export default function Home() {
                 getCwpViews().map(view => (
                   <div key={view.id} className="space-y-4">
                     <div className="flex items-center gap-3">
-                      <div className="h-5 w-1 bg-[#1E3A8A] rounded-full" />
+                      <div className="h-5 w-1 bg-[#0C1E4F] rounded-full" />
                       <h4 className="text-xl font-black italic text-slate-900">{view.name}</h4>
                       <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">
                         {entities.find(e => e.id === view.entity_id)?.name}
@@ -668,7 +672,7 @@ export default function Home() {
                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Origen</p>
                   <p className="font-black text-slate-900 text-sm">{sourceEntity.name}</p>
                 </div>
-                <ArrowRight size={20} className="text-[#1E3A8A] shrink-0" />
+                <ArrowRight size={20} className="text-[#0C1E4F] shrink-0" />
                 <div className="flex-1 text-center">
                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Destino</p>
                   <p className="font-black text-slate-900 text-sm">{targetEntity.name}</p>
@@ -684,7 +688,7 @@ export default function Home() {
                   <select
                     value={pendingAttrs.parentAttrId}
                     onChange={e => setPendingAttrs(prev => ({ ...prev, parentAttrId: e.target.value }))}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-[#1E3A8A]"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-brand-electric"
                   >
                     <option value="">Seleccionar...</option>
                     {(sourceEntity.attributes || []).map((a: any) => (
@@ -699,7 +703,7 @@ export default function Home() {
                   <select
                     value={pendingAttrs.childAttrId}
                     onChange={e => setPendingAttrs(prev => ({ ...prev, childAttrId: e.target.value }))}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-[#1E3A8A]"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-brand-electric"
                   >
                     <option value="">Seleccionar...</option>
                     {(targetEntity.attributes || []).map((a: any) => (

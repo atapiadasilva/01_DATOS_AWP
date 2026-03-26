@@ -229,7 +229,7 @@ export default function DataEditor({ entities }: DataEditorProps) {
           <select
             value={selectedEntityId}
             onChange={e => setSelectedEntityId(e.target.value)}
-            className="w-full text-xs font-bold p-3 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-[#1E3A8A] transition-colors"
+            className="w-full text-xs font-bold p-3 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-brand-electric transition-colors"
           >
             <option value="">Seleccionar tabla...</option>
             {entities.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
@@ -246,7 +246,7 @@ export default function DataEditor({ entities }: DataEditorProps) {
               }`}
             >
               <div className="flex items-center gap-3">
-                <Database size={13} className={selectedEntityId === e.id ? 'text-[#1E3A8A]' : 'text-slate-300'} />
+                <Database size={13} className={selectedEntityId === e.id ? 'text-[#0C1E4F]' : 'text-slate-300'} />
                 <span className="truncate">{e.name}</span>
               </div>
               {selectedEntityId === e.id && <ChevronRight size={13} />}
@@ -268,7 +268,7 @@ export default function DataEditor({ entities }: DataEditorProps) {
                 placeholder="Buscar en todos los campos..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-bold outline-none focus:border-[#1E3A8A] transition-all"
+                className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-bold outline-none focus:border-brand-electric transition-all"
               />
               {searchQuery && (
                 <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500">
@@ -296,7 +296,7 @@ export default function DataEditor({ entities }: DataEditorProps) {
             <button
               onClick={() => setShowColumnFilters(v => !v)}
               title="Filtros por columna"
-              className={`p-2.5 rounded-xl transition-all relative ${showColumnFilters ? 'bg-[#1E3A8A] text-white' : 'bg-slate-50 text-slate-400 hover:bg-slate-100 border border-slate-100'}`}
+              className={`p-2.5 rounded-xl transition-all relative ${showColumnFilters ? 'bg-[#0C1E4F] text-white' : 'bg-slate-50 text-slate-400 hover:bg-slate-100 border border-slate-100'}`}
             >
               <SlidersHorizontal size={15} />
               {activeFilterCount > 0 && (
@@ -353,7 +353,7 @@ export default function DataEditor({ entities }: DataEditorProps) {
         {cwpColumn && cwpValues.length > 0 && (
           <div className="px-8 py-2.5 bg-white border-b border-slate-100 flex items-center gap-2.5 overflow-x-auto shrink-0">
             <div className="flex items-center gap-2 shrink-0">
-              <Tag size={11} className="text-[#1E3A8A]" />
+              <Tag size={11} className="text-[#0C1E4F]" />
               <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Filtro CWP</span>
             </div>
             <button
@@ -372,7 +372,7 @@ export default function DataEditor({ entities }: DataEditorProps) {
                   onClick={() => setCwpQuickFilter(cwpQuickFilter === val ? '' : val)}
                   className={`px-3.5 py-1.5 rounded-full text-[9px] font-black transition-all whitespace-nowrap shrink-0 ${
                     cwpQuickFilter === val
-                      ? 'bg-[#1E3A8A] text-white shadow-md shadow-[#1E3A8A]/30'
+                      ? 'bg-[#0C1E4F] text-white shadow-md shadow-[#0C1E4F]/30'
                       : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                   }`}
                 >
@@ -387,7 +387,7 @@ export default function DataEditor({ entities }: DataEditorProps) {
         {selectedEntityId && (
           <div className="px-8 py-2.5 flex items-center justify-between border-b border-slate-100 bg-white/50 text-[10px] font-black uppercase tracking-widest text-slate-400 shrink-0">
             <div className="flex items-center gap-5">
-              <span className="flex items-center gap-1.5"><Layers size={11} className="text-[#1E3A8A]" /> {data.length} Total</span>
+              <span className="flex items-center gap-1.5"><Layers size={11} className="text-[#0C1E4F]" /> {data.length} Total</span>
               <span className="flex items-center gap-1.5"><Filter size={11} /> {filteredData.length} Filtrados</span>
               <span className="flex items-center gap-1.5"><CheckSquare size={11} className="text-blue-500" /> {selectedRows.size} Sel.</span>
               {hiddenColumns.size > 0 && (
@@ -426,14 +426,14 @@ export default function DataEditor({ entities }: DataEditorProps) {
                       <button
                         onClick={() => handleSelectGroup(groupRows)}
                         className={`p-1.5 rounded-xl transition-all ${
-                          groupRows.every(r => selectedRows.has(r.id)) ? 'bg-[#1E3A8A] text-white' : 'bg-white text-slate-300 border border-slate-200'
+                          groupRows.every(r => selectedRows.has(r.id)) ? 'bg-[#0C1E4F] text-white' : 'bg-white text-slate-300 border border-slate-200'
                         }`}
                       >
                         {groupRows.every(r => selectedRows.has(r.id)) ? <CheckSquare size={14} /> : <Square size={14} />}
                       </button>
-                      <div className="h-3.5 w-1 bg-[#1E3A8A] rounded-full" />
+                      <div className="h-3.5 w-1 bg-[#0C1E4F] rounded-full" />
                       <h3 className="text-xs font-black text-slate-700 uppercase tracking-widest">
-                        {groupBy}: <span className="text-[#1E3A8A] italic">{groupKey}</span>
+                        {groupBy}: <span className="text-[#0C1E4F] italic">{groupKey}</span>
                       </h3>
                       <span className="text-[10px] font-bold text-slate-300">({groupRows.length})</span>
                     </div>
@@ -447,13 +447,13 @@ export default function DataEditor({ entities }: DataEditorProps) {
                             <th className="px-5 py-4 w-10 border-b border-slate-100 sticky left-0 bg-slate-50/90">
                               <button onClick={selectAll} className="p-1 hover:bg-slate-200 rounded-lg transition-colors">
                                 {selectedRows.size === filteredData.length && filteredData.length > 0
-                                  ? <CheckSquare size={16} className="text-[#1E3A8A]" />
+                                  ? <CheckSquare size={16} className="text-[#0C1E4F]" />
                                   : <Square size={16} className="text-slate-300" />}
                               </button>
                             </th>
                             {visibleColumns.map(col => (
                               <th key={col} className={`px-5 py-4 text-[10px] font-black uppercase tracking-widest border-b border-slate-100 whitespace-nowrap ${
-                                col === cwpColumn ? 'text-[#1E3A8A]' : 'text-slate-400'
+                                col === cwpColumn ? 'text-[#0C1E4F]' : 'text-slate-400'
                               }`}>
                                 <div className="flex items-center gap-1.5">
                                   {col === cwpColumn && <Tag size={9} />}
@@ -474,7 +474,7 @@ export default function DataEditor({ entities }: DataEditorProps) {
                                     onChange={e => setColumnFilters(prev => ({ ...prev, [col]: e.target.value }))}
                                     placeholder="Filtrar..."
                                     className={`w-full px-2.5 py-1.5 bg-slate-50 border rounded-lg text-[9px] font-medium outline-none transition-all ${
-                                      columnFilters[col] ? 'border-[#1E3A8A] bg-blue-50/30' : 'border-slate-200 focus:border-[#1E3A8A]'
+                                      columnFilters[col] ? 'border-[#0C1E4F] bg-blue-50/30' : 'border-slate-200 focus:border-brand-electric'
                                     }`}
                                   />
                                 </td>
@@ -494,7 +494,7 @@ export default function DataEditor({ entities }: DataEditorProps) {
                                 <td className="px-5 py-3 sticky left-0 bg-inherit">
                                   <button
                                     onClick={(e) => handleSelectRow(row.id, e.shiftKey)}
-                                    className={`p-1 rounded-lg transition-colors ${isSelected ? 'text-[#1E3A8A]' : 'text-slate-200 group-hover:text-slate-300'}`}
+                                    className={`p-1 rounded-lg transition-colors ${isSelected ? 'text-[#0C1E4F]' : 'text-slate-200 group-hover:text-slate-300'}`}
                                   >
                                     {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
                                   </button>
@@ -506,8 +506,8 @@ export default function DataEditor({ entities }: DataEditorProps) {
                                       value={editedRecords[row.id] ? (editedRecords[row.id][col] ?? '') : (row[col] ?? '')}
                                       onChange={(e) => handleEdit(row.id, col, e.target.value)}
                                       className={`w-full bg-transparent border-none outline-none text-xs transition-all font-medium min-w-[80px] ${
-                                        isEdited ? 'text-amber-700 font-bold' : col === cwpColumn ? 'text-[#1E3A8A] font-bold' : 'text-slate-600'
-                                      } hover:bg-slate-100 p-1.5 rounded-lg focus:bg-white focus:shadow-inner focus:ring-1 focus:ring-[#1E3A8A]/20`}
+                                        isEdited ? 'text-amber-700 font-bold' : col === cwpColumn ? 'text-[#0C1E4F] font-bold' : 'text-slate-600'
+                                      } hover:bg-slate-100 p-1.5 rounded-lg focus:bg-white focus:shadow-inner focus:ring-1 focus:ring-brand-electric/20`}
                                     />
                                   </td>
                                 ))}
@@ -538,7 +538,7 @@ export default function DataEditor({ entities }: DataEditorProps) {
             <div className="flex gap-2">
               <button
                 onClick={() => setHiddenColumns(new Set())}
-                className="flex-1 py-1.5 text-[9px] font-black text-[#1E3A8A] uppercase tracking-wider hover:bg-blue-50 rounded-lg transition-all"
+                className="flex-1 py-1.5 text-[9px] font-black text-[#0C1E4F] uppercase tracking-wider hover:bg-blue-50 rounded-lg transition-all"
               >
                 Mostrar Todas
               </button>
@@ -568,9 +568,9 @@ export default function DataEditor({ entities }: DataEditorProps) {
                 >
                   {isHidden
                     ? <EyeOff size={11} className="text-slate-200 shrink-0" />
-                    : <Eye size={11} className={col === cwpColumn ? 'text-[#1E3A8A] shrink-0' : 'text-slate-400 shrink-0'} />
+                    : <Eye size={11} className={col === cwpColumn ? 'text-[#0C1E4F] shrink-0' : 'text-slate-400 shrink-0'} />
                   }
-                  <span className={`truncate ${col === cwpColumn ? 'text-[#1E3A8A] font-black' : ''}`}>{col}</span>
+                  <span className={`truncate ${col === cwpColumn ? 'text-[#0C1E4F] font-black' : ''}`}>{col}</span>
                 </button>
               );
             })}

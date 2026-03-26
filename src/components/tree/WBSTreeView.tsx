@@ -94,8 +94,8 @@ export default function WBSTreeView({ data, edtKey }: WBSTreeViewProps) {
       project: node.parentId || undefined,
       displayOrder: visibleNodes.indexOf(node) + 1,
       styles: {
-        backgroundColor: node.type === 'project' ? '#1E3A8A' : '#AED581',
-        backgroundSelectedColor: '#1E40AF',
+        backgroundColor: node.type === 'project' ? '#0C1E4F' : '#AED581',
+        backgroundSelectedColor: '#0284C7',
         progressColor: '#33691E',
         progressSelectedColor: '#1B5E20',
       }
@@ -123,7 +123,7 @@ export default function WBSTreeView({ data, edtKey }: WBSTreeViewProps) {
               placeholder="Buscar en WBS..."
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
-              className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold focus:border-[#1E3A8A] outline-none transition-all w-64 shadow-sm"
+              className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold focus:border-brand-electric outline-none transition-all w-64 shadow-sm"
             />
           </div>
           <div className="flex bg-white border border-slate-200 rounded-xl p-1 shadow-sm">
@@ -143,7 +143,7 @@ export default function WBSTreeView({ data, edtKey }: WBSTreeViewProps) {
 
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-2">
-            <Activity size={14} className="text-[#1E3A8A]" />
+            <Activity size={14} className="text-[#0C1E4F]" />
             <span className="text-[11px] font-black text-slate-500 uppercase tracking-widest">{treeResult.flatTasks.length} Nodos WBS</span>
           </div>
           <div className="flex items-center gap-2">
@@ -174,8 +174,8 @@ export default function WBSTreeView({ data, edtKey }: WBSTreeViewProps) {
               rowHeight={45}
               barCornerRadius={8}
               handleWidth={8}
-              projectBackgroundColor="#1E3A8A"
-              projectBackgroundSelectedColor="#1E40AF"
+              projectBackgroundColor="#0C1E4F"
+              projectBackgroundSelectedColor="#0284C7"
               fontSize="11px"
               fontFamily="inherit"
               TaskListHeader={({ headerHeight }) => (
@@ -198,7 +198,7 @@ export default function WBSTreeView({ data, edtKey }: WBSTreeViewProps) {
                       <div 
                         key={t.id}
                         className={`flex items-center px-2 cursor-pointer transition-colors border-b border-slate-50 ${
-                          selectedTaskId === t.id ? 'bg-[#1E3A8A]/10' : 'hover:bg-slate-50'
+                          selectedTaskId === t.id ? 'bg-[#0C1E4F]/10' : 'hover:bg-slate-50'
                         }`}
                         style={{ height: rowHeight }}
                         onClick={() => setSelectedTask(t.id)}
@@ -242,7 +242,7 @@ export default function WBSTreeView({ data, edtKey }: WBSTreeViewProps) {
               <div className="max-w-7xl mx-auto flex gap-12">
                 <div className="flex-1 space-y-4">
                   <div className="flex items-center gap-3">
-                    <span className="px-3 py-1 bg-blue-50 text-[#1E3A8A] text-[10px] font-black rounded-full border border-blue-100 uppercase tracking-widest">
+                    <span className="px-3 py-1 bg-blue-50 text-[#0C1E4F] text-[10px] font-black rounded-full border border-blue-100 uppercase tracking-widest">
                       {node.type === 'project' ? 'Resumen WBS' : 'Actividad'}
                     </span>
                     <h4 className="text-2xl font-black text-slate-900 italic tracking-tight">{node.id} — {node.name}</h4>
@@ -256,7 +256,7 @@ export default function WBSTreeView({ data, edtKey }: WBSTreeViewProps) {
                       </div>
                     </div>
                     <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex items-center gap-3">
-                      <CheckCircle2 className="text-[#1E3A8A]" size={20} />
+                      <CheckCircle2 className="text-[#0C1E4F]" size={20} />
                       <div>
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Progreso</p>
                         <p className="text-lg font-black text-slate-700">{Math.round(node.progress)}%</p>

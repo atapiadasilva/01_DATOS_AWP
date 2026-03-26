@@ -10,18 +10,12 @@ const config: Config = {
     extend: {
       colors: {
         brand: {
-          DEFAULT: '#1E3A8A',
-          dark:    '#0F2544',
-          hover:   '#1E40AF',
-          light:   '#3B82F6',
-          50:      '#EFF6FF',
-          100:     '#DBEAFE',
-          200:     '#BFDBFE',
-        },
-        banana: {
-          DEFAULT: '#F5C518',
-          light:   '#FEF9C3',
-          dark:    '#D97706',
+          deep:     '#0C1E4F', // Azul Profundo
+          electric: '#00BFFF', // Azul Eléctrico (Acentos)
+          slate:    '#3C4A57', // Gris Pizarra
+          cloud:    '#F0F4F7', // Gris Claro (Fondo)
+          orange:   '#FF9800', // Acento Naranja
+          DEFAULT:  '#0C1E4F',
         },
       },
       backgroundImage: {

@@ -266,7 +266,7 @@ export default function RelationalExplorer({ entities, relationships, onRefresh 
   };
 
   const getColumnColor = (col: string) => {
-    if (!col.includes('::')) return col === cwpColumn ? 'bg-[#EFF6FF] text-[#1E3A8A]' : 'bg-slate-100 text-slate-600';
+    if (!col.includes('::')) return col === cwpColumn ? 'bg-[#F0F4F7] text-[#0C1E4F]' : 'bg-slate-100 text-slate-600';
     const [entityId] = col.split('::');
     const colors = ['bg-blue-50 text-blue-600', 'bg-purple-50 text-purple-600', 'bg-amber-50 text-amber-700', 'bg-rose-50 text-rose-600', 'bg-teal-50 text-teal-600'];
     const idx = entities.findIndex(e => e.id === entityId) % colors.length;
@@ -302,7 +302,7 @@ export default function RelationalExplorer({ entities, relationships, onRefresh 
           <select
             value={baseEntityId}
             onChange={e => setBaseEntityId(e.target.value)}
-            className="w-full text-xs font-bold p-3 bg-slate-50 border border-slate-100 rounded-xl outline-none focus:border-[#1E3A8A] transition-colors"
+            className="w-full text-xs font-bold p-3 bg-slate-50 border border-slate-100 rounded-xl outline-none focus:border-brand-electric transition-colors"
           >
             <option value="">Seleccionar inicio de cadena...</option>
             {entities.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
@@ -316,7 +316,7 @@ export default function RelationalExplorer({ entities, relationships, onRefresh 
                 placeholder="Buscar columna o tabla..."
                 value={columnSearch}
                 onChange={e => setColumnSearch(e.target.value)}
-                className="w-full text-[10px] font-bold pl-8 pr-4 py-2 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-[#1E3A8A]"
+                className="w-full text-[10px] font-bold pl-8 pr-4 py-2 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-brand-electric"
               />
             </div>
           )}
@@ -337,7 +337,7 @@ export default function RelationalExplorer({ entities, relationships, onRefresh 
                       selectedBaseColumns.includes(col) ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-50'
                     }`}
                   >
-                    <span className={`truncate flex items-center gap-1.5 ${['CWP','PACKAGE','PAQUETE'].includes(col.toUpperCase().trim()) ? 'text-[#1E3A8A]' : ''}`}>
+                    <span className={`truncate flex items-center gap-1.5 ${['CWP','PACKAGE','PAQUETE'].includes(col.toUpperCase().trim()) ? 'text-[#0C1E4F]' : ''}`}>
                       {['CWP','PACKAGE','PAQUETE'].includes(col.toUpperCase().trim()) && <Tag size={9} />}
                       {col}
                     </span>
@@ -455,7 +455,7 @@ export default function RelationalExplorer({ entities, relationships, onRefresh 
                   placeholder="Filtrar resultados..."
                   value={tableFilter}
                   onChange={e => setTableFilter(e.target.value)}
-                  className="w-full pl-8 pr-8 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[10px] font-bold outline-none focus:border-[#1E3A8A]"
+                  className="w-full pl-8 pr-8 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[10px] font-bold outline-none focus:border-brand-electric"
                 />
                 {tableFilter && (
                   <button onClick={() => setTableFilter('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500">
@@ -467,7 +467,7 @@ export default function RelationalExplorer({ entities, relationships, onRefresh 
               {/* CWP quick filter */}
               {cwpColumn && cwpValues.length > 0 && (
                 <div className="flex items-center gap-2 overflow-x-auto max-w-md">
-                  <Tag size={11} className="text-[#1E3A8A] shrink-0" />
+                  <Tag size={11} className="text-[#0C1E4F] shrink-0" />
                   <button
                     onClick={() => setCwpFilter('')}
                     className={`px-3 py-1.5 rounded-full text-[9px] font-black shrink-0 transition-all ${!cwpFilter ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
@@ -478,7 +478,7 @@ export default function RelationalExplorer({ entities, relationships, onRefresh 
                     <button
                       key={val}
                       onClick={() => setCwpFilter(cwpFilter === val ? '' : val)}
-                      className={`px-3 py-1.5 rounded-full text-[9px] font-black shrink-0 transition-all ${cwpFilter === val ? 'bg-[#1E3A8A] text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                      className={`px-3 py-1.5 rounded-full text-[9px] font-black shrink-0 transition-all ${cwpFilter === val ? 'bg-[#0C1E4F] text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
                     >
                       {val}
                     </button>
@@ -545,7 +545,7 @@ export default function RelationalExplorer({ entities, relationships, onRefresh 
                       <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
                         {allDisplayColumns.map(col => (
                           <td key={col} className="px-4 py-2.5 max-w-[200px]">
-                            <span className={`block truncate ${!row[col] || row[col] === '—' ? 'text-slate-300 italic text-[9px]' : col === cwpColumn ? 'text-[#1E3A8A] font-bold text-[11px]' : 'text-slate-700'}`}>
+                            <span className={`block truncate ${!row[col] || row[col] === '—' ? 'text-slate-300 italic text-[9px]' : col === cwpColumn ? 'text-[#0C1E4F] font-bold text-[11px]' : 'text-slate-700'}`}>
                               {row[col] !== null && row[col] !== undefined ? String(row[col]) : '—'}
                             </span>
                           </td>
@@ -600,7 +600,7 @@ export default function RelationalExplorer({ entities, relationships, onRefresh 
                   onKeyDown={e => e.key === 'Enter' && handleSaveAsView()}
                   placeholder="Ej: Programa General, Log de Planos..."
                   autoFocus
-                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:border-[#1E3A8A] transition-all"
+                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:border-brand-electric transition-all"
                 />
               </div>
 
@@ -608,7 +608,7 @@ export default function RelationalExplorer({ entities, relationships, onRefresh 
                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Configuración detectada</p>
                 <p className="text-[11px] font-bold text-slate-600">Tabla base: <span className="text-slate-900">{baseEntity?.name}</span></p>
                 <p className="text-[11px] font-bold text-slate-600">Columnas: <span className="text-slate-900">{selectedBaseColumns.length} seleccionadas</span></p>
-                {cwpColumn && <p className="text-[11px] font-bold text-[#1E3A8A]">Filtro CWP detectado: <span className="font-black">{cwpColumn}</span></p>}
+                {cwpColumn && <p className="text-[11px] font-bold text-[#0C1E4F]">Filtro CWP detectado: <span className="font-black">{cwpColumn}</span></p>}
               </div>
             </div>
 
@@ -620,7 +620,7 @@ export default function RelationalExplorer({ entities, relationships, onRefresh 
                 onClick={handleSaveAsView}
                 disabled={!saveViewName.trim() || isSavingView || saveSuccess}
                 className={`flex-1 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${
-                  saveSuccess ? 'bg-[#1E3A8A] text-white' : 'bg-slate-900 text-white hover:bg-slate-800'
+                  saveSuccess ? 'bg-[#0C1E4F] text-white' : 'bg-slate-900 text-white hover:bg-slate-800'
                 } disabled:opacity-50`}
               >
                 {saveSuccess ? <><Check size={14} /> Guardada</> : isSavingView ? <Loader2 className="animate-spin" size={14} /> : <><Save size={14} /> Guardar</>}

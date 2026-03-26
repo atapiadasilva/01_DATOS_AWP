@@ -37,17 +37,17 @@ function getCellStyle(count: number, colMax: number): { bg: string; text: string
   const pct = count / colMax;
   if (pct <= 0.12) return { bg: 'bg-blue-50',        text: 'text-blue-400',  ring: 'ring-1 ring-blue-100' };
   if (pct <= 0.30) return { bg: 'bg-blue-100',        text: 'text-blue-600',  ring: 'ring-1 ring-blue-200' };
-  if (pct <= 0.55) return { bg: 'bg-[#BFDBFE]',       text: 'text-[#1E40AF]', ring: 'ring-1 ring-blue-300' };
-  if (pct <= 0.80) return { bg: 'bg-[#1E3A8A]/25',    text: 'text-[#1E3A8A]', ring: 'ring-1 ring-[#1E3A8A]/30' };
-  return               { bg: 'bg-[#1E3A8A]',          text: 'text-white',     ring: '' };
+  if (pct <= 0.55) return { bg: 'bg-[rgba(0,191,255,0.22)]',       text: 'text-[#0284C7]', ring: 'ring-1 ring-blue-300' };
+  if (pct <= 0.80) return { bg: 'bg-[#0C1E4F]/25',    text: 'text-[#0C1E4F]', ring: 'ring-1 ring-brand-electric/30' };
+  return               { bg: 'bg-[#0C1E4F]',          text: 'text-white',     ring: '' };
 }
 
 function getTotalStyle(count: number): string {
   if (!count) return 'bg-slate-50 text-slate-300';
   if (count < 10)  return 'bg-slate-100 text-slate-500';
   if (count < 50)  return 'bg-blue-50 text-blue-600';
-  if (count < 200) return 'bg-[#DBEAFE] text-[#1E40AF] font-black';
-  return 'bg-[#1E3A8A] text-white font-black';
+  if (count < 200) return 'bg-[rgba(0,191,255,0.12)] text-[#0284C7] font-black';
+  return 'bg-[#0C1E4F] text-white font-black';
 }
 
 // ─── Mini waffle chart (4 × 5 = 20 cuadros)
@@ -250,7 +250,7 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
         <div className="max-w-sm">
           <p className="text-xl font-black italic text-slate-700 mb-2">Sin vistas configuradas</p>
           <p className="text-sm text-slate-400 font-bold italic">
-            Ve a <span className="text-[#1E3A8A] font-black">Vistas Personalizadas</span> y asigna una
+            Ve a <span className="text-[#0C1E4F] font-black">Vistas Personalizadas</span> y asigna una
             {' '}<span className="font-black">Columna de Filtrado</span> (CWP o EDT) para que aparezcan en esta matriz.
           </p>
         </div>
@@ -271,7 +271,7 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
               placeholder="Buscar CWP..."
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="w-full pl-8 pr-8 py-2 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold outline-none focus:border-[#1E3A8A]"
+              className="w-full pl-8 pr-8 py-2 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold outline-none focus:border-brand-electric"
             />
             {search && (
               <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500">
@@ -283,9 +283,9 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
           <div className="flex items-center gap-5 text-[10px] font-black uppercase tracking-widest text-slate-400">
             <span>{displayCwps.length} CWPs</span>
             <span>{linkedViews.length} Vistas</span>
-            <span className="text-[#1E3A8A]">{grandTotal.toLocaleString()} únicos totales</span>
+            <span className="text-[#0C1E4F]">{grandTotal.toLocaleString()} únicos totales</span>
             {coverageStats && (
-              <span className={coverageStats.pct >= 70 ? 'text-[#1E3A8A]' : 'text-amber-500'}>
+              <span className={coverageStats.pct >= 70 ? 'text-[#0C1E4F]' : 'text-amber-500'}>
                 {coverageStats.pct}% cobertura
               </span>
             )}
@@ -322,9 +322,9 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
           { label: 'Sin datos', bg: 'bg-slate-100',      text: 'text-slate-300' },
           { label: 'Pocos',     bg: 'bg-blue-50',        text: 'text-blue-400' },
           { label: 'Medio',     bg: 'bg-blue-100',       text: 'text-blue-600' },
-          { label: 'Bueno',     bg: 'bg-[#BFDBFE]',      text: 'text-[#1E40AF]' },
-          { label: 'Alto',      bg: 'bg-[#1E3A8A]/25',   text: 'text-[#1E3A8A]' },
-          { label: 'Máximo',    bg: 'bg-[#1E3A8A]',      text: 'text-white' },
+          { label: 'Bueno',     bg: 'bg-[rgba(0,191,255,0.22)]',      text: 'text-[#0284C7]' },
+          { label: 'Alto',      bg: 'bg-[#0C1E4F]/25',   text: 'text-[#0C1E4F]' },
+          { label: 'Máximo',    bg: 'bg-[#0C1E4F]',      text: 'text-white' },
         ].map(item => (
           <div key={item.label} className="flex items-center gap-1.5">
             <div className={`w-5 h-5 rounded-md ${item.bg} flex items-center justify-center`}>
@@ -366,7 +366,7 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
                       className="px-4 py-3 border-b border-slate-100 cursor-pointer hover:bg-slate-50 transition-colors min-w-[130px] max-w-[160px]"
                     >
                       <div className="flex flex-col items-center gap-1">
-                        <span className={`text-[10px] font-black uppercase tracking-widest truncate max-w-[140px] block ${isSorted ? 'text-[#1E3A8A]' : 'text-slate-700'}`}>
+                        <span className={`text-[10px] font-black uppercase tracking-widest truncate max-w-[140px] block ${isSorted ? 'text-[#0C1E4F]' : 'text-slate-700'}`}>
                           {view.name}
                         </span>
                         <span className="text-[8px] font-bold text-slate-300 truncate max-w-[140px] block">
@@ -378,13 +378,13 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
                           </span>
                         )}
                         <div className="flex items-center gap-1">
-                          <span className={`text-[9px] font-black ${isSorted ? 'text-[#1E3A8A]' : 'text-slate-300'}`}>
+                          <span className={`text-[9px] font-black ${isSorted ? 'text-[#0C1E4F]' : 'text-slate-300'}`}>
                             {colTotals[view.id]?.toLocaleString() ?? 0}
                           </span>
                           {isSorted
                             ? sortDir === 'desc'
-                              ? <ArrowDown size={9} className="text-[#1E3A8A]" />
-                              : <ArrowUp size={9} className="text-[#1E3A8A]" />
+                              ? <ArrowDown size={9} className="text-[#0C1E4F]" />
+                              : <ArrowUp size={9} className="text-[#0C1E4F]" />
                             : <ArrowUpDown size={9} className="text-slate-200" />
                           }
                         </div>
@@ -397,7 +397,7 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
                 <th className="px-4 py-4 border-b border-l border-slate-200 min-w-[80px]">
                   <div className="text-center">
                     <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Total</span>
-                    <span className="text-[10px] font-black text-[#1E3A8A]">{grandTotal.toLocaleString()}</span>
+                    <span className="text-[10px] font-black text-[#0C1E4F]">{grandTotal.toLocaleString()}</span>
                   </div>
                 </th>
               </tr>
@@ -414,7 +414,7 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
                     {/* CWP name */}
                     <td className="sticky left-0 z-10 bg-inherit px-5 py-3 border-r border-slate-100">
                       <button onClick={() => onSelectCWP?.(cwp)} className="text-left w-full group/btn">
-                        <p className="text-[11px] font-black text-slate-800 group-hover/btn:text-[#1E3A8A] transition-colors truncate max-w-[160px]">
+                        <p className="text-[11px] font-black text-slate-800 group-hover/btn:text-[#0C1E4F] transition-colors truncate max-w-[160px]">
                           {cwp.name}
                         </p>
                         <p className="text-[9px] font-bold text-slate-400 truncate">{cwp.discipline}</p>
@@ -473,7 +473,7 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
                   </td>
                 ))}
                 <td className="px-3 py-3 text-center border-l border-slate-700">
-                  <span className="text-base font-black text-[#F5C518]">
+                  <span className="text-base font-black text-[#FF9800]">
                     {grandTotal.toLocaleString()}
                   </span>
                 </td>
