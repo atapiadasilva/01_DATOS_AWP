@@ -7,7 +7,8 @@ import {
   ArrowRight, Check, ChevronRight, Layout, Network,
   BarChart3, Layers, Search, Eye,
   ArrowUp, ArrowDown,
-  Link, Unlink, Edit3, StickyNote
+  Link, Unlink, Edit3, StickyNote,
+  TrendingUp, Clock, Target, ChevronDown
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import * as XLSX from 'xlsx';
@@ -185,6 +186,41 @@ export default function Home() {
   // ─── CWP Dashboard: búsqueda y notas ──────────────────────────
   const [cwpSearch, setCwpSearch] = useState('');
   const [cwpNotes, setCwpNotes] = useState<Record<string, string>>({});
+
+  // ─── HH del Programa (de gantt_program.json) ─────────────────
+  const [ganttTasks, setGanttTasks] = useState<any[]>([]);
+  useEffect(() => {
+    fetch('/gantt_program.json')
+      .then(r => r.json())
+      .then((data: any[]) => setGanttTasks(data.map(d => ({
+        ...d, hh: parseFloat(d.hh) || 0, pct: parseFloat(d.pct) || 0,
+      }))));
+  }, []);
+
+  // HH por CWP: sólo hojas (sin doble conteo de padres)
+  const cwpHHMap = useMemo(() => {
+    const map: Record<string, { totalHH: number; doneHH: number; pct: number; tasks: any[] }> = {};
+    const withCwp = ganttTasks.filter(t => t.cwp?.trim());
+    const codes = [...new Set(withCwp.map(t => t.cwp.trim()))];
+    codes.forEach(cwp => {
+      const group = withCwp.filter(t => t.cwp.trim() === cwp);
+      const leaves = group.filter(t => !group.some(o => o.edt.startsWith(t.edt + '.')));
+      const totalHH = leaves.reduce((s, t) => s + t.hh, 0);
+      const doneHH  = leaves.reduce((s, t) => s + t.hh * t.pct / 100, 0);
+      map[cwp] = { totalHH, doneHH, pct: totalHH > 0 ? doneHH / totalHH * 100 : 0, tasks: leaves };
+    });
+    return map;
+  }, [ganttTasks]);
+
+  // Busca HH para un nombre de CWP (exacto o parcial)
+  const getCwpHHData = (cwpName: string) => {
+    if (cwpHHMap[cwpName]) return { key: cwpName, ...cwpHHMap[cwpName] };
+    const key = Object.keys(cwpHHMap).find(k =>
+      k.toLowerCase().includes(cwpName.toLowerCase()) ||
+      cwpName.toLowerCase().includes(k.toLowerCase())
+    );
+    return key ? { key, ...cwpHHMap[key] } : null;
+  };
 
   // ─── Upload ──────────────────────────────────────────────────────────
   const [selectedEntityForUpload, setSelectedEntityForUpload] = useState('');
@@ -385,6 +421,10 @@ export default function Home() {
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                       {disciplineCwps.map((cwp: any) => {
                         const globalViewCount = getCwpViews().length;
+                        const hhData = getCwpHHData(cwp.name);
+                        // HH a mostrar: preferir Gantt, luego Supabase
+                        const displayHH = hhData?.totalHH ?? cwp.hh ?? 0;
+                        const displayPct = hhData?.pct ?? 0;
                         return (
                           <div
                             key={cwp.name}
@@ -396,6 +436,30 @@ export default function Home() {
                             </div>
                             <h5 className="text-sm font-black text-brand-deep truncate group-hover:text-brand-electric transition-colors">{cwp.name}</h5>
                             <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-1">{cwp.activities} Act.</p>
+
+                            {/* HH del programa */}
+                            {displayHH > 0 && (
+                              <div className="mt-3 space-y-1.5">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">HH</span>
+                                  <span className="text-[10px] font-black text-brand-deep">
+                                    {displayHH.toLocaleString('es-CL', { maximumFractionDigits: 0 })} h
+                                  </span>
+                                </div>
+                                {displayPct > 0 && (
+                                  <div>
+                                    <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                                      <div
+                                        className={`h-full rounded-full ${displayPct === 100 ? 'bg-brand-deep' : 'bg-brand-electric'}`}
+                                        style={{ width: `${displayPct}%` }}
+                                      />
+                                    </div>
+                                    <p className="text-[7px] font-black text-brand-slate/40 mt-0.5 text-right">{displayPct.toFixed(0)}% avance</p>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
                             {globalViewCount > 0 && (
                               <div className="mt-2 flex items-center gap-1">
                                 <Layout size={9} className="text-brand-electric" />
@@ -577,26 +641,101 @@ export default function Home() {
 
           {/* Body */}
           <div className="flex-1 flex overflow-hidden">
-            {/* Sidebar izquierdo: stats + notas */}
-            <div className="w-72 bg-slate-50 border-r border-slate-200 flex flex-col p-6 space-y-5 overflow-y-auto shrink-0">
-              {/* Stats */}
-              <div className="bg-white/80 backdrop-blur-md rounded-[2rem] border border-white p-5 space-y-3 shadow-xl shadow-brand-deep/5">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Resumen</p>
+            {/* Sidebar izquierdo: stats + HH + notas */}
+            <div className="w-72 bg-brand-cloud/30 border-r border-brand-cloud flex flex-col p-6 space-y-5 overflow-y-auto shrink-0">
+              {/* Stats base */}
+              <div className="bg-white rounded-[2rem] border border-brand-cloud p-5 space-y-3 shadow-sm">
+                <p className="text-[9px] font-black text-brand-slate/40 uppercase tracking-widest">Resumen</p>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-slate-500">Actividades</span>
-                    <span className="text-sm font-black text-slate-900">{selectedCWP.activities}</span>
+                    <span className="text-[10px] font-bold text-brand-slate/60">Actividades</span>
+                    <span className="text-sm font-black text-brand-deep">{selectedCWP.activities}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-slate-500">HH Estimadas</span>
-                    <span className="text-sm font-black text-slate-900">{selectedCWP.hh?.toLocaleString() || 0}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-slate-500">Vistas activas</span>
+                    <span className="text-[10px] font-bold text-brand-slate/60">Vistas activas</span>
                     <span className="text-sm font-black text-brand-electric">{getCwpViews().length}</span>
                   </div>
                 </div>
               </div>
+
+              {/* ─── HH del Programa ─── */}
+              {(() => {
+                const hhData = getCwpHHData(selectedCWP.name);
+                const totalHH = hhData?.totalHH ?? selectedCWP.hh ?? 0;
+                const doneHH  = hhData?.doneHH  ?? 0;
+                const pct     = hhData?.pct      ?? 0;
+                const remainHH = totalHH - doneHH;
+                if (totalHH === 0) return null;
+                return (
+                  <div className="bg-brand-deep rounded-[2rem] p-5 space-y-4 shadow-xl shadow-brand-deep/20">
+                    <div className="flex items-center gap-2">
+                      <TrendingUp size={12} className="text-brand-electric" />
+                      <p className="text-[9px] font-black text-brand-electric/80 uppercase tracking-widest">HH Programa</p>
+                    </div>
+
+                    {/* Barra global */}
+                    <div>
+                      <div className="flex justify-between text-[8px] font-black text-white/50 mb-1.5">
+                        <span>Avance</span>
+                        <span className="text-brand-orange">{pct.toFixed(1)}%</span>
+                      </div>
+                      <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-brand-orange to-brand-electric transition-all duration-700"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Métricas HH */}
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { label: 'Total', val: totalHH, color: 'text-white' },
+                        { label: 'Ejec.', val: doneHH,  color: 'text-brand-electric' },
+                        { label: 'Rest.', val: remainHH, color: 'text-brand-orange' },
+                      ].map(({ label, val, color }) => (
+                        <div key={label} className="bg-white/5 rounded-xl p-2 text-center">
+                          <p className="text-[7px] font-black uppercase tracking-widest text-white/40">{label}</p>
+                          <p className={`text-[10px] font-black mt-0.5 ${color}`}>
+                            {val.toLocaleString('es-CL', { maximumFractionDigits: 0 })}
+                          </p>
+                          <p className="text-[6px] font-bold text-white/30">h</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Actividades vinculadas */}
+                    {hhData && hhData.tasks.length > 0 && (
+                      <div className="space-y-1.5">
+                        <p className="text-[7px] font-black text-white/30 uppercase tracking-widest">
+                          {hhData.tasks.length} actividades vinculadas
+                        </p>
+                        <div className="space-y-1 max-h-40 overflow-y-auto custom-scrollbar pr-1">
+                          {hhData.tasks.map((t: any) => (
+                            <div key={t.edt} className="bg-white/5 rounded-lg px-2 py-1.5">
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-[7px] font-black text-brand-electric/70 shrink-0">{t.edt}</span>
+                                <span className="text-[7px] font-black text-brand-orange shrink-0">
+                                  {t.hh > 0 ? `${t.hh.toLocaleString('es-CL', { maximumFractionDigits: 0 })} h` : '—'}
+                                </span>
+                              </div>
+                              <p className="text-[7px] font-medium text-white/50 truncate mt-0.5">{t.name}</p>
+                              {t.hh > 0 && (
+                                <div className="h-0.5 bg-white/10 rounded-full overflow-hidden mt-1">
+                                  <div
+                                    className="h-full bg-brand-electric/70 rounded-full"
+                                    style={{ width: `${t.pct}%` }}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Notas */}
               <div className="bg-white rounded-[2rem] border border-slate-100 p-5 space-y-3 flex flex-col">
@@ -627,8 +766,121 @@ export default function Home() {
               )}
             </div>
 
-            {/* Área principal: vistas del CWP */}
+            {/* Área principal: HH + vistas del CWP */}
             <div className="flex-1 overflow-y-auto p-10 space-y-10">
+
+              {/* ─── Tabla HH del programa para este CWP ─── */}
+              {(() => {
+                const hhData = getCwpHHData(selectedCWP.name);
+                if (!hhData || hhData.tasks.length === 0) return null;
+                return (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3">
+                      <div className="h-5 w-1 bg-brand-electric rounded-full shadow-[0_0_8px_rgba(0,191,255,0.5)]" />
+                      <h4 className="text-xl font-black italic text-brand-deep">HH del Programa</h4>
+                      <span className="text-[9px] font-black text-brand-slate/30 uppercase tracking-widest">
+                        {hhData.key}
+                      </span>
+                    </div>
+
+                    {/* Métricas rápidas */}
+                    <div className="grid grid-cols-3 gap-4">
+                      {[
+                        { label: 'HH Totales',    val: hhData.totalHH, sub: '100%',                          color: 'text-brand-deep', bg: 'bg-brand-deep/5 border-brand-deep/10' },
+                        { label: 'HH Ejecutadas', val: hhData.doneHH,  sub: `${hhData.pct.toFixed(1)}%`,     color: 'text-brand-electric', bg: 'bg-brand-electric/5 border-brand-electric/20' },
+                        { label: 'HH Restantes',  val: hhData.totalHH - hhData.doneHH, sub: `${(100 - hhData.pct).toFixed(1)}%`, color: 'text-brand-orange', bg: 'bg-brand-orange/5 border-brand-orange/20' },
+                      ].map(({ label, val, sub, color, bg }) => (
+                        <div key={label} className={`rounded-[2rem] border p-5 ${bg}`}>
+                          <p className="text-[9px] font-black uppercase tracking-widest text-brand-slate/40">{label}</p>
+                          <p className={`text-2xl font-black mt-1 ${color}`}>
+                            {val.toLocaleString('es-CL', { maximumFractionDigits: 0 })}
+                            <span className="text-sm ml-1">h</span>
+                          </p>
+                          <p className={`text-[9px] font-bold mt-0.5 ${color} opacity-60`}>{sub}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Barra de avance */}
+                    <div className="bg-white rounded-[2rem] border border-brand-cloud p-5">
+                      <div className="flex justify-between text-[9px] font-black uppercase tracking-widest text-brand-slate/40 mb-3">
+                        <span>Avance global del CWP</span>
+                        <span className="text-brand-electric">{hhData.pct.toFixed(1)}%</span>
+                      </div>
+                      <div className="h-3 bg-brand-cloud rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-brand-electric to-brand-deep rounded-full transition-all duration-700"
+                          style={{ width: `${hhData.pct}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Tabla de actividades */}
+                    <div className="bg-white rounded-[2rem] border border-brand-cloud overflow-hidden shadow-sm">
+                      <table className="w-full text-left border-collapse">
+                        <thead className="bg-brand-deep text-white">
+                          <tr>
+                            <th className="px-4 py-3 text-[8px] font-black uppercase tracking-widest">EDT</th>
+                            <th className="px-4 py-3 text-[8px] font-black uppercase tracking-widest">Actividad</th>
+                            <th className="px-4 py-3 text-[8px] font-black uppercase tracking-widest text-right">HH</th>
+                            <th className="px-4 py-3 text-[8px] font-black uppercase tracking-widest text-right">HH Ejec.</th>
+                            <th className="px-4 py-3 text-[8px] font-black uppercase tracking-widest">Avance</th>
+                            <th className="px-4 py-3 text-[8px] font-black uppercase tracking-widest">Inicio</th>
+                            <th className="px-4 py-3 text-[8px] font-black uppercase tracking-widest">Fin</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-brand-cloud">
+                          {hhData.tasks.map((t: any, i: number) => (
+                            <tr key={t.edt} className={i % 2 === 0 ? 'bg-white' : 'bg-brand-cloud/20'}>
+                              <td className="px-4 py-3 text-[9px] font-black text-brand-deep/60">{t.edt}</td>
+                              <td className="px-4 py-3 text-[10px] font-bold text-brand-slate/80 max-w-xs">
+                                <span className="line-clamp-2">{t.name}</span>
+                              </td>
+                              <td className="px-4 py-3 text-[10px] font-black text-brand-deep text-right">
+                                {t.hh > 0 ? t.hh.toLocaleString('es-CL', { maximumFractionDigits: 0 }) + ' h' : '—'}
+                              </td>
+                              <td className="px-4 py-3 text-[10px] font-black text-brand-electric text-right">
+                                {t.hh > 0 ? (t.hh * t.pct / 100).toLocaleString('es-CL', { maximumFractionDigits: 0 }) + ' h' : '—'}
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-2">
+                                  <div className="flex-1 h-1.5 bg-brand-cloud rounded-full overflow-hidden min-w-[60px]">
+                                    <div
+                                      className={`h-full rounded-full ${t.pct === 100 ? 'bg-brand-deep' : t.pct > 0 ? 'bg-brand-electric' : 'bg-slate-200'}`}
+                                      style={{ width: `${t.pct}%` }}
+                                    />
+                                  </div>
+                                  <span className={`text-[9px] font-black w-8 text-right shrink-0 ${t.pct === 100 ? 'text-brand-deep' : t.pct > 0 ? 'text-brand-electric' : 'text-brand-slate/30'}`}>
+                                    {t.pct}%
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-[9px] text-brand-slate/50 font-medium">{t.aStart}</td>
+                              <td className="px-4 py-3 text-[9px] text-brand-slate/50 font-medium">{t.aEnd}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot className="bg-brand-cloud/40 border-t-2 border-brand-cloud">
+                          <tr>
+                            <td colSpan={2} className="px-4 py-3 text-[9px] font-black uppercase tracking-widest text-brand-deep">Total</td>
+                            <td className="px-4 py-3 text-[10px] font-black text-brand-deep text-right">
+                              {hhData.totalHH.toLocaleString('es-CL', { maximumFractionDigits: 0 })} h
+                            </td>
+                            <td className="px-4 py-3 text-[10px] font-black text-brand-electric text-right">
+                              {hhData.doneHH.toLocaleString('es-CL', { maximumFractionDigits: 0 })} h
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className="text-[9px] font-black text-brand-orange">{hhData.pct.toFixed(1)}%</span>
+                            </td>
+                            <td colSpan={2} />
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {getCwpViews().length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-80 gap-6 text-center">
                   <div className="w-24 h-24 bg-slate-50 rounded-[2.5rem] flex items-center justify-center text-slate-200 shadow-inner">
