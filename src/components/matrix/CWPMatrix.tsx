@@ -14,15 +14,32 @@ interface CWPMatrixProps {
   onSelectCWP?: (cwp: any) => void;
 }
 
-// ─── Escala de color por intensidad relativa ─────────────────────────────────
+// ─── Detecta la columna identificadora de un documento (distinta del filter_key)
+function getDocIdColumn(view: any): string | null {
+  const cols: string[] = view.columns || [];
+  const filterKey = (view.filter_key || '').toUpperCase();
+  const idPatterns = [
+    'PLANO', 'DRAWING', 'NUMERO', 'NUMBER', 'NUM', 'CODIGO',
+    'CODE', 'DOC', 'DOCUMENT', 'ITEM', 'ID', 'TAG', 'REV',
+  ];
+  const byPattern = cols.find(c =>
+    idPatterns.some(p => c.toUpperCase().includes(p)) &&
+    c.toUpperCase() !== filterKey
+  );
+  if (byPattern) return byPattern;
+  // Fallback: primera columna que no sea el filter_key
+  return cols.find(c => c.toUpperCase() !== filterKey) ?? cols[0] ?? null;
+}
+
+// ─── Escala de color por intensidad relativa
 function getCellStyle(count: number, colMax: number): { bg: string; text: string; ring: string } {
   if (!count || colMax === 0) return { bg: 'bg-slate-100', text: 'text-slate-300', ring: '' };
   const pct = count / colMax;
-  if (pct <= 0.12) return { bg: 'bg-blue-50',            text: 'text-blue-400',    ring: 'ring-1 ring-blue-100' };
-  if (pct <= 0.30) return { bg: 'bg-blue-100',           text: 'text-blue-600',    ring: 'ring-1 ring-blue-200' };
-  if (pct <= 0.55) return { bg: 'bg-[#BFDBFE]',          text: 'text-[#1E40AF]',   ring: 'ring-1 ring-blue-300' };
-  if (pct <= 0.80) return { bg: 'bg-[#1E3A8A]/25',       text: 'text-[#1E3A8A]',   ring: 'ring-1 ring-[#1E3A8A]/30' };
-  return               { bg: 'bg-[#1E3A8A]',             text: 'text-white',       ring: '' };
+  if (pct <= 0.12) return { bg: 'bg-blue-50',        text: 'text-blue-400',  ring: 'ring-1 ring-blue-100' };
+  if (pct <= 0.30) return { bg: 'bg-blue-100',        text: 'text-blue-600',  ring: 'ring-1 ring-blue-200' };
+  if (pct <= 0.55) return { bg: 'bg-[#BFDBFE]',       text: 'text-[#1E40AF]', ring: 'ring-1 ring-blue-300' };
+  if (pct <= 0.80) return { bg: 'bg-[#1E3A8A]/25',    text: 'text-[#1E3A8A]', ring: 'ring-1 ring-[#1E3A8A]/30' };
+  return               { bg: 'bg-[#1E3A8A]',          text: 'text-white',     ring: '' };
 }
 
 function getTotalStyle(count: number): string {
@@ -33,15 +50,32 @@ function getTotalStyle(count: number): string {
   return 'bg-[#1E3A8A] text-white font-black';
 }
 
+// ─── Mini waffle chart (4 × 5 = 20 cuadros)
+const WAFFLE_TOTAL = 20;
+function MiniWaffle({ count, colMax, textColor }: { count: number; colMax: number; textColor: string }) {
+  const filled = count > 0 && colMax > 0
+    ? Math.max(1, Math.round((count / colMax) * WAFFLE_TOTAL))
+    : 0;
+  return (
+    <div className="grid grid-cols-5 gap-[2px] mt-1.5 px-0.5">
+      {Array.from({ length: WAFFLE_TOTAL }).map((_, i) => (
+        <div
+          key={i}
+          className={`w-[5px] h-[5px] rounded-[1px] ${textColor} ${i < filled ? 'opacity-60' : 'opacity-10'} bg-current`}
+        />
+      ))}
+    </div>
+  );
+}
+
 export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCWP }: CWPMatrixProps) {
-  // counts[cwpName][viewId] = número de registros
+  // counts[cwpName][viewId] = conteo de valores únicos del identificador principal
   const [counts, setCounts]       = useState<Record<string, Record<string, number>>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [lastLoad, setLastLoad]   = useState<Date | null>(null);
   const [search, setSearch]       = useState('');
   const [sortView, setSortView]   = useState<string | null>(null);
   const [sortDir, setSortDir]     = useState<'asc' | 'desc'>('desc');
-  const [hoveredCell, setHoveredCell] = useState<string | null>(null);
 
   // Sólo vistas con filter_key configurado
   const linkedViews = useMemo(() =>
@@ -54,7 +88,7 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
     [cwpGroups]
   );
 
-  // ─── Máximos por columna (para escala de color) ───────────────────────────
+  // ─── Máximos por columna (para escala de color y waffle)
   const columnMaxes = useMemo(() => {
     const maxes: Record<string, number> = {};
     linkedViews.forEach(view => {
@@ -63,7 +97,7 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
     return maxes;
   }, [counts, linkedViews, allCwps]);
 
-  // ─── CWPs filtrados y ordenados ───────────────────────────────────────────
+  // ─── CWPs filtrados y ordenados
   const displayCwps = useMemo(() => {
     let result = allCwps;
     if (search) {
@@ -82,7 +116,7 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
     return result;
   }, [allCwps, search, sortView, sortDir, counts]);
 
-  // ─── Totales ──────────────────────────────────────────────────────────────
+  // ─── Totales
   const rowTotals = useMemo(() => {
     const totals: Record<string, number> = {};
     allCwps.forEach((cwp: any) => {
@@ -104,14 +138,15 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
     [colTotals]
   );
 
-  // ─── Carga de conteos ────────────────────────────────────────────────────
+  // ─── Carga de conteos con deduplicación por identificador único ──────────────
   const loadCounts = async () => {
     if (linkedViews.length === 0 || allCwps.length === 0) return;
     setIsLoading(true);
 
-    const newCounts: Record<string, Record<string, number>> = {};
+    // Acumulamos Sets para deduplicar: distinctSets[cwpVal][viewId] = Set<docId>
+    const distinctSets: Record<string, Record<string, Set<string>>> = {};
 
-    // Agrupar vistas por entity_id para hacer una sola query por entidad
+    // Agrupar vistas por entity_id → una sola query por entidad
     const entityMap: Record<string, typeof linkedViews> = {};
     linkedViews.forEach(v => {
       if (!entityMap[v.entity_id]) entityMap[v.entity_id] = [];
@@ -120,27 +155,45 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
 
     await Promise.all(
       Object.entries(entityMap).map(async ([entityId, views]) => {
-        // Traer sólo el campo data de los registros
         const { data, error } = await supabase
           .from('data_records')
-          .select('data')
+          .select('id, data')
           .eq('entity_id', entityId);
 
         if (error || !data) return;
 
-        // Calcular conteos para cada vista de esta entidad
         views.forEach(view => {
-          const key = view.filter_key;
+          const filterKey = view.filter_key;
+          const docIdCol  = getDocIdColumn(view);
+
           data.forEach(r => {
-            const rawVal = r.data?.[key] ?? r.data?.CWP ?? r.data?.PACKAGE ?? '';
-            const cwpVal = String(rawVal).trim();
+            // Valor del filtro CWP
+            const rawCwp = r.data?.[filterKey] ?? '';
+            const cwpVal = String(rawCwp).trim();
             if (!cwpVal) return;
-            if (!newCounts[cwpVal]) newCounts[cwpVal] = {};
-            newCounts[cwpVal][view.id] = (newCounts[cwpVal][view.id] || 0) + 1;
+
+            // Identificador único del documento (para deduplicar)
+            const rawDoc  = docIdCol ? r.data?.[docIdCol] : null;
+            const docId   = rawDoc != null && String(rawDoc).trim() !== ''
+              ? String(rawDoc).trim()
+              : String(r.id);   // fallback al id del registro
+
+            if (!distinctSets[cwpVal])          distinctSets[cwpVal] = {};
+            if (!distinctSets[cwpVal][view.id]) distinctSets[cwpVal][view.id] = new Set();
+            distinctSets[cwpVal][view.id].add(docId);
           });
         });
       })
     );
+
+    // Convertir Sets → conteos
+    const newCounts: Record<string, Record<string, number>> = {};
+    Object.entries(distinctSets).forEach(([cwpName, viewMap]) => {
+      newCounts[cwpName] = {};
+      Object.entries(viewMap).forEach(([viewId, set]) => {
+        newCounts[cwpName][viewId] = set.size;
+      });
+    });
 
     setCounts(newCounts);
     setLastLoad(new Date());
@@ -149,9 +202,10 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
 
   useEffect(() => {
     if (linkedViews.length > 0 && allCwps.length > 0) loadCounts();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linkedViews.length, allCwps.length]);
 
-  // ─── Exportar a Excel ────────────────────────────────────────────────────
+  // ─── Exportar a Excel
   const handleExport = () => {
     const rows = displayCwps.map((cwp: any) => {
       const row: any = { CWP: cwp.name, Disciplina: cwp.discipline };
@@ -165,7 +219,7 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
     XLSX.writeFile(wb, `Matriz_CWP_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
-  // ─── Toggle orden de columna ─────────────────────────────────────────────
+  // ─── Toggle orden de columna
   const toggleSort = (viewId: string) => {
     if (sortView === viewId) {
       if (sortDir === 'desc') setSortDir('asc');
@@ -176,17 +230,17 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
     }
   };
 
-  // ─── Estadísticas de cobertura ───────────────────────────────────────────
+  // ─── Estadísticas de cobertura
   const coverageStats = useMemo(() => {
     if (!allCwps.length || !linkedViews.length) return null;
-    const total = allCwps.length * linkedViews.length;
+    const total  = allCwps.length * linkedViews.length;
     const filled = allCwps.reduce((acc, cwp: any) =>
       acc + linkedViews.filter(v => (counts[cwp.name]?.[v.id] ?? 0) > 0).length, 0
     );
     return { total, filled, pct: Math.round((filled / total) * 100) };
   }, [allCwps, linkedViews, counts]);
 
-  // ─── Render ───────────────────────────────────────────────────────────────
+  // ─── Render
   if (linkedViews.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-6 text-center p-20">
@@ -207,10 +261,9 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
   return (
     <div className="flex flex-col h-full overflow-hidden">
 
-      {/* ─── Header de controles ─── */}
+      {/* ─── Header de controles */}
       <div className="shrink-0 px-8 py-4 bg-white border-b border-slate-100 flex items-center justify-between gap-4">
         <div className="flex items-center gap-4 flex-1">
-          {/* Búsqueda */}
           <div className="relative max-w-xs flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={13} />
             <input
@@ -227,11 +280,10 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
             )}
           </div>
 
-          {/* Stats */}
           <div className="flex items-center gap-5 text-[10px] font-black uppercase tracking-widest text-slate-400">
             <span>{displayCwps.length} CWPs</span>
             <span>{linkedViews.length} Vistas</span>
-            <span className="text-[#1E3A8A]">{grandTotal.toLocaleString()} registros totales</span>
+            <span className="text-[#1E3A8A]">{grandTotal.toLocaleString()} únicos totales</span>
             {coverageStats && (
               <span className={coverageStats.pct >= 70 ? 'text-[#1E3A8A]' : 'text-amber-500'}>
                 {coverageStats.pct}% cobertura
@@ -263,38 +315,41 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
         </div>
       </div>
 
-      {/* ─── Leyenda de colores ─── */}
-      <div className="shrink-0 px-8 py-2 bg-white border-b border-slate-100 flex items-center gap-3">
+      {/* ─── Leyenda */}
+      <div className="shrink-0 px-8 py-2 bg-white border-b border-slate-100 flex items-center gap-4">
         <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest mr-1">Intensidad</span>
         {[
-          { label: 'Sin datos', bg: 'bg-slate-100', text: 'text-slate-300' },
-          { label: 'Pocos',     bg: 'bg-blue-50',   text: 'text-blue-400' },
-          { label: 'Medio',     bg: 'bg-blue-100',   text: 'text-blue-600' },
-          { label: 'Bueno',     bg: 'bg-[#BFDBFE]',  text: 'text-[#1E40AF]' },
-          { label: 'Alto',      bg: 'bg-[#1E3A8A]/25', text: 'text-[#1E3A8A]' },
-          { label: 'Máximo',    bg: 'bg-[#1E3A8A]',  text: 'text-white' },
+          { label: 'Sin datos', bg: 'bg-slate-100',      text: 'text-slate-300' },
+          { label: 'Pocos',     bg: 'bg-blue-50',        text: 'text-blue-400' },
+          { label: 'Medio',     bg: 'bg-blue-100',       text: 'text-blue-600' },
+          { label: 'Bueno',     bg: 'bg-[#BFDBFE]',      text: 'text-[#1E40AF]' },
+          { label: 'Alto',      bg: 'bg-[#1E3A8A]/25',   text: 'text-[#1E3A8A]' },
+          { label: 'Máximo',    bg: 'bg-[#1E3A8A]',      text: 'text-white' },
         ].map(item => (
           <div key={item.label} className="flex items-center gap-1.5">
             <div className={`w-5 h-5 rounded-md ${item.bg} flex items-center justify-center`}>
-              <span className={`text-[8px] font-black ${item.text}`}>N</span>
+              <span className={`text-[7px] font-black ${item.text}`}>N</span>
             </div>
             <span className="text-[9px] text-slate-400 font-bold">{item.label}</span>
           </div>
         ))}
+        <span className="ml-4 text-[9px] text-slate-300 font-bold italic">
+          · El número muestra valores únicos (sin duplicados por documento)
+        </span>
       </div>
 
-      {/* ─── Tabla Matriz ─── */}
+      {/* ─── Tabla Matriz */}
       <div className="flex-1 overflow-auto">
         {isLoading ? (
           <div className="flex flex-col items-center justify-center h-full gap-4 text-slate-400">
             <Loader2 className="animate-spin" size={32} />
-            <p className="text-sm font-bold italic">Calculando registros por CWP...</p>
+            <p className="text-sm font-bold italic">Calculando documentos únicos por CWP...</p>
           </div>
         ) : (
           <table className="border-collapse w-max min-w-full">
             <thead className="sticky top-0 z-20 bg-white shadow-sm">
               <tr>
-                {/* CWP column header */}
+                {/* CWP header */}
                 <th className="sticky left-0 z-30 bg-white px-5 py-4 text-left border-b border-r border-slate-200 min-w-[180px]">
                   <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">CWP</span>
                 </th>
@@ -302,12 +357,13 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
                 {/* View columns */}
                 {linkedViews.map(view => {
                   const isSorted = sortView === view.id;
-                  const entity = entities.find(e => e.id === view.entity_id);
+                  const entity   = entities.find(e => e.id === view.entity_id);
+                  const docCol   = getDocIdColumn(view);
                   return (
                     <th
                       key={view.id}
                       onClick={() => toggleSort(view.id)}
-                      className="px-4 py-3 border-b border-slate-100 cursor-pointer hover:bg-slate-50 transition-colors min-w-[120px] max-w-[160px]"
+                      className="px-4 py-3 border-b border-slate-100 cursor-pointer hover:bg-slate-50 transition-colors min-w-[130px] max-w-[160px]"
                     >
                       <div className="flex flex-col items-center gap-1">
                         <span className={`text-[10px] font-black uppercase tracking-widest truncate max-w-[140px] block ${isSorted ? 'text-[#1E3A8A]' : 'text-slate-700'}`}>
@@ -316,6 +372,11 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
                         <span className="text-[8px] font-bold text-slate-300 truncate max-w-[140px] block">
                           {entity?.name?.slice(0, 20)}
                         </span>
+                        {docCol && (
+                          <span className="text-[7px] font-black text-slate-200 truncate max-w-[130px] block italic">
+                            ID: {docCol}
+                          </span>
+                        )}
                         <div className="flex items-center gap-1">
                           <span className={`text-[9px] font-black ${isSorted ? 'text-[#1E3A8A]' : 'text-slate-300'}`}>
                             {colTotals[view.id]?.toLocaleString() ?? 0}
@@ -350,12 +411,9 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
                     key={cwp.name}
                     className={`group transition-all ${rowIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'} hover:bg-blue-50/20`}
                   >
-                    {/* CWP name cell */}
+                    {/* CWP name */}
                     <td className="sticky left-0 z-10 bg-inherit px-5 py-3 border-r border-slate-100">
-                      <button
-                        onClick={() => onSelectCWP?.(cwp)}
-                        className="text-left w-full group/btn"
-                      >
+                      <button onClick={() => onSelectCWP?.(cwp)} className="text-left w-full group/btn">
                         <p className="text-[11px] font-black text-slate-800 group-hover/btn:text-[#1E3A8A] transition-colors truncate max-w-[160px]">
                           {cwp.name}
                         </p>
@@ -367,33 +425,32 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
                     {linkedViews.map(view => {
                       const count = counts[cwp.name]?.[view.id] ?? 0;
                       const { bg, text, ring } = getCellStyle(count, columnMaxes[view.id] ?? 1);
-                      const cellKey = `${cwp.name}::${view.id}`;
                       return (
                         <td key={view.id} className="px-2 py-2 text-center border-r border-slate-50">
                           <div
-                            className={`relative mx-auto w-[100px] h-10 rounded-xl flex flex-col items-center justify-center cursor-pointer transition-all hover:scale-105 hover:shadow-md ${bg} ${ring}`}
+                            className={`relative mx-auto w-[110px] rounded-xl flex flex-col items-center justify-center cursor-pointer transition-all hover:scale-105 hover:shadow-md px-2 pt-2 pb-1.5 ${bg} ${ring}`}
                             onClick={() => onSelectCWP?.(cwp)}
-                            onMouseEnter={() => setHoveredCell(cellKey)}
-                            onMouseLeave={() => setHoveredCell(null)}
-                            title={`${cwp.name} × ${view.name}: ${count} registros`}
+                            title={`${cwp.name} × ${view.name}: ${count} únicos`}
                           >
+                            {/* Número único */}
                             <span className={`text-sm font-black leading-none ${text}`}>
                               {count > 0 ? count.toLocaleString() : '—'}
                             </span>
-                            {count > 0 && columnMaxes[view.id] > 0 && (
-                              <div className="absolute bottom-1 left-2 right-2 h-0.5 rounded-full bg-current opacity-20">
-                                <div
-                                  className="h-full rounded-full bg-current opacity-60"
-                                  style={{ width: `${Math.max(4, (count / columnMaxes[view.id]) * 100)}%` }}
-                                />
-                              </div>
+
+                            {/* Mini waffle chart */}
+                            {count > 0 && (
+                              <MiniWaffle
+                                count={count}
+                                colMax={columnMaxes[view.id] ?? 1}
+                                textColor={text}
+                              />
                             )}
                           </div>
                         </td>
                       );
                     })}
 
-                    {/* Total de fila */}
+                    {/* Total fila */}
                     <td className="px-3 py-2 border-l border-slate-100 text-center">
                       <span className={`inline-block px-3 py-1.5 rounded-xl text-xs font-black ${getTotalStyle(rowTotal)}`}>
                         {rowTotal > 0 ? rowTotal.toLocaleString() : '—'}
@@ -403,7 +460,7 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
                 );
               })}
 
-              {/* ─── Fila de totales ─── */}
+              {/* ─── Fila de totales */}
               <tr className="bg-slate-900 text-white sticky bottom-0 z-10">
                 <td className="sticky left-0 z-20 bg-slate-900 px-5 py-4 border-r border-slate-700">
                   <span className="text-[10px] font-black uppercase tracking-widest text-slate-300">TOTALES</span>
