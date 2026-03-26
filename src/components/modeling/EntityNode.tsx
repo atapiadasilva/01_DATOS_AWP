@@ -6,7 +6,7 @@ import { Handle, Position } from 'reactflow';
 const EntityNode = ({ data }: { data: { name: string; attributes: { name: string; is_primary_key: boolean }[] } }) => {
   return (
     <div className="bg-slate-900 border border-slate-700 rounded-lg shadow-xl min-w-[200px] text-white overflow-hidden font-sans">
-      <div className="bg-slate-800 px-4 py-2 border-b border-slate-700 font-bold text-sm tracking-wide uppercase text-[#7CB342]">
+      <div className="bg-slate-800 px-4 py-2 border-b border-slate-700 font-bold text-sm tracking-wide uppercase text-[#1E3A8A]">
         {data.name}
       </div>
       <div className="py-2">
@@ -26,7 +26,7 @@ const EntityNode = ({ data }: { data: { name: string; attributes: { name: string
               type="target"
               position={Position.Left}
               id={col.name}
-              className="!w-2 !h-2 !bg-green-500 !border-none group-hover:scale-125 transition-transform"
+              className="!w-2 !h-2 !bg-[#1E3A8A] !border-none group-hover:scale-125 transition-transform"
             />
           </div>
         ))}

@@ -1,45 +1,61 @@
 import React from 'react';
-import { Menu, Search, Bell, HelpCircle, User, Globe, ChevronDown } from 'lucide-react';
+import { Search, Bell, HelpCircle, User, Globe, ChevronDown } from 'lucide-react';
 
 export default function Topbar() {
   return (
-    <header className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-4 z-20 sticky top-0">
-      <div className="flex items-center space-x-4">
-        <div className="flex items-center space-x-2 text-[#7CB342] font-bold text-xl tracking-tight">
-          <div className="w-8 h-8 rounded-full border-[3px] border-[#7CB342] flex items-center justify-center p-1">
-             <div className="w-full h-full bg-[#7CB342] rounded-full opacity-30"></div>
+    <header className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-5 z-20 sticky top-0 shadow-sm">
+      {/* ── Brand ── */}
+      <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          {/* Logo mark */}
+          <div className="w-8 h-8 rounded-lg bg-[#1E3A8A] flex items-center justify-center shadow-md shadow-[#1E3A8A]/30 shrink-0">
+            <span className="text-white text-[11px] font-black tracking-tighter select-none">AG</span>
           </div>
-          <span>O3 Solutions</span>
+
+          {/* Brand name + product badge */}
+          <div className="flex items-center gap-2">
+            <span className="text-[#0F2544] font-black text-[17px] tracking-tight leading-none select-none">
+              Antigravity
+            </span>
+            <span className="px-2 py-0.5 bg-[#F5C518] text-[#0F2544] text-[8px] font-black rounded-full uppercase tracking-widest select-none leading-none pt-1">
+              nano banana
+            </span>
+          </div>
         </div>
-        <button className="flex items-center space-x-2 text-slate-700 hover:text-slate-900 mx-2">
-          <Menu className="w-5 h-5 text-[#7CB342]" />
-        </button>
-        <button className="flex items-center space-x-1 hover:bg-slate-50 px-2 py-1.5 rounded text-sm font-semibold text-slate-700">
-          <span>Demo Training 01</span>
-          <ChevronDown className="w-4 h-4 text-slate-500" />
+
+        {/* Project selector */}
+        <button className="flex items-center gap-1.5 hover:bg-slate-50 px-3 py-1.5 rounded-lg text-sm font-semibold text-slate-600 border border-transparent hover:border-slate-200 transition-all ml-2">
+          <span>Proyecto AWP</span>
+          <ChevronDown className="w-4 h-4 text-slate-400" />
         </button>
       </div>
 
-      <div className="flex items-center space-x-3">
+      {/* ── Right controls ── */}
+      <div className="flex items-center gap-2">
         <div className="relative flex items-center">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <Search className="w-4 h-4 text-slate-400" />
-          </div>
-          <input 
-            type="text" 
-            placeholder="Búsqueda" 
-            className="w-64 pl-9 pr-4 py-1.5 bg-slate-100 border border-transparent rounded-full text-sm focus:ring-2 focus:bg-white focus:ring-[#7CB342]/50 focus:border-[#7CB342] transition-all outline-none"
+          <Search className="absolute left-3 w-4 h-4 text-slate-400 pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Buscar..."
+            className="w-56 pl-9 pr-4 py-1.5 bg-slate-100 border border-transparent rounded-full text-sm focus:ring-2 focus:bg-white focus:ring-[#1E3A8A]/20 focus:border-[#1E3A8A] transition-all outline-none"
           />
         </div>
-        <div className="flex items-center space-x-1 ml-4 text-slate-500">
-          <button className="p-2 hover:bg-slate-100 rounded-full transition-colors"><Bell className="w-5 h-5" /></button>
-          <button className="p-2 hover:bg-slate-100 rounded-full transition-colors"><HelpCircle className="w-5 h-5" /></button>
+
+        <div className="flex items-center gap-0.5 ml-2">
+          <button className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500">
+            <Bell className="w-5 h-5" />
+          </button>
+          <button className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500">
+            <HelpCircle className="w-5 h-5" />
+          </button>
           <button className="p-2 hover:bg-slate-100 rounded-full transition-colors">
-            <div className="w-7 h-7 bg-[#7CB342] rounded-full flex items-center justify-center text-white">
+            <div className="w-7 h-7 bg-[#1E3A8A] rounded-full flex items-center justify-center text-white shadow-sm">
               <User className="w-4 h-4" />
             </div>
           </button>
-          <button className="p-2 hover:bg-slate-100 rounded-full transition-colors"><Globe className="w-5 h-5" /></button>
+          <button className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500">
+            <Globe className="w-5 h-5" />
+          </button>
         </div>
       </div>
     </header>

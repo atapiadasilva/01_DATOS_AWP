@@ -109,7 +109,7 @@ const EmbeddedView = ({ viewName, filterValue, customViews, title, entities = []
         <Database size={28} className="text-slate-200" />
         <div>
           <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Vista no configurada: {viewName}</p>
-          <select className="mt-2 w-full p-3 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold outline-none focus:border-[#7CB342]" onChange={e => setSelectedEntityId(e.target.value)} value={selectedEntityId || ''}>
+          <select className="mt-2 w-full p-3 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold outline-none focus:border-[#1E3A8A]" onChange={e => setSelectedEntityId(e.target.value)} value={selectedEntityId || ''}>
             <option value="">Seleccionar base de datos...</option>
             {entities.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
           </select>
@@ -128,7 +128,7 @@ const EmbeddedView = ({ viewName, filterValue, customViews, title, entities = []
           </p>
         </div>
         {!isAdding && !isCompact && (
-          <button onClick={() => setIsAdding(true)} className="px-4 py-2 bg-[#7CB342] text-white rounded-xl text-[10px] font-black uppercase flex items-center gap-1.5 hover:bg-[#689f38] transition-all shadow-md print:hidden">
+          <button onClick={() => setIsAdding(true)} className="px-4 py-2 bg-[#1E3A8A] text-white rounded-xl text-[10px] font-black uppercase flex items-center gap-1.5 hover:bg-[#1E40AF] transition-all shadow-md print:hidden">
             <Plus size={13} /> Agregar
           </button>
         )}
@@ -139,7 +139,7 @@ const EmbeddedView = ({ viewName, filterValue, customViews, title, entities = []
             {(view.columns || []).map((col: string) => (
               <div key={col}>
                 <label className="block text-[9px] uppercase font-black text-slate-400 mb-1.5 tracking-widest">{col}</label>
-                <input type="text" value={newRow[col] || ''} onChange={e => setNewRow({ ...newRow, [col]: e.target.value })} className="w-full text-xs p-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:border-[#7CB342]" />
+                <input type="text" value={newRow[col] || ''} onChange={e => setNewRow({ ...newRow, [col]: e.target.value })} className="w-full text-xs p-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:border-[#1E3A8A]" />
               </div>
             ))}
           </div>
@@ -377,7 +377,7 @@ export default function Home() {
                     placeholder="Buscar CWP, disciplina..."
                     value={cwpSearch}
                     onChange={e => setCwpSearch(e.target.value)}
-                    className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:border-[#7CB342] shadow-sm"
+                    className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:border-[#1E3A8A] shadow-sm"
                   />
                   {cwpSearch && (
                     <button onClick={() => setCwpSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500">
@@ -397,7 +397,7 @@ export default function Home() {
                 return (
                   <div key={discipline} className="mb-8">
                     <div className="flex items-center gap-3 mb-3">
-                      <div className="h-4 w-1 bg-[#7CB342] rounded-full" />
+                      <div className="h-4 w-1 bg-[#1E3A8A] rounded-full" />
                       <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest">{discipline}</h3>
                       <span className="text-[9px] text-slate-300 font-bold">({disciplineCwps.length})</span>
                     </div>
@@ -410,12 +410,12 @@ export default function Home() {
                             onClick={() => { setSelectedCWP(cwp); setCwpDetailTab('views'); }}
                             className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-md cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all group"
                           >
-                            <h5 className="text-sm font-black text-slate-900 truncate group-hover:text-[#7CB342] transition-colors">{cwp.name}</h5>
+                            <h5 className="text-sm font-black text-slate-900 truncate group-hover:text-[#1E3A8A] transition-colors">{cwp.name}</h5>
                             <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-1">{cwp.activities} Act.</p>
                             {assignedCount > 0 && (
                               <div className="mt-2 flex items-center gap-1">
-                                <Layout size={9} className="text-[#7CB342]" />
-                                <span className="text-[9px] font-black text-[#7CB342]">{assignedCount} vistas</span>
+                                <Layout size={9} className="text-[#1E3A8A]" />
+                                <span className="text-[9px] font-black text-[#1E3A8A]">{assignedCount} vistas</span>
                               </div>
                             )}
                           </div>
@@ -451,7 +451,7 @@ export default function Home() {
                       placeholder="Nombre de la tabla..."
                       value={newEntityName}
                       onChange={e => setNewEntityName(e.target.value)}
-                      className="w-full p-3 bg-slate-50 border border-slate-100 rounded-xl text-sm font-bold outline-none focus:border-[#7CB342]"
+                      className="w-full p-3 bg-slate-50 border border-slate-100 rounded-xl text-sm font-bold outline-none focus:border-[#1E3A8A]"
                     />
                     <button onClick={handleSaveIngestion} disabled={isUploading} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-3">
                       {isUploading ? <><Loader2 className="animate-spin" size={18} />Guardando...</> : <><Upload size={18} />Guardar Datos</>}
@@ -480,7 +480,7 @@ export default function Home() {
           {activeTab === 'modeling' && (
             <div className="p-6 h-[calc(100vh-64px)]">
               <div className="mb-4 p-4 bg-white rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
-                <Network size={16} className="text-[#7CB342]" />
+                <Network size={16} className="text-[#1E3A8A]" />
                 <p className="text-xs font-bold text-slate-500">
                   Arrastra desde el handle de un nodo hacia otro para crear una conexión. Puedes seleccionar exactamente qué columnas conectar.
                 </p>
@@ -565,7 +565,7 @@ export default function Home() {
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setShowViewPicker(true)}
-                className="px-5 py-2 bg-[#7CB342]/20 text-[#7CB342] border border-[#7CB342]/30 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-[#7CB342]/30 transition-all"
+                className="px-5 py-2 bg-[#1E3A8A]/20 text-[#1E3A8A] border border-[#1E3A8A]/30 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-[#1E3A8A]/30 transition-all"
               >
                 <Plus size={13} /> Añadir Vista
               </button>
@@ -593,7 +593,7 @@ export default function Home() {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-bold text-slate-500">Vistas asignadas</span>
-                    <span className="text-sm font-black text-[#7CB342]">{(cwpAssignments[selectedCWP.name] || []).length}</span>
+                    <span className="text-sm font-black text-[#1E3A8A]">{(cwpAssignments[selectedCWP.name] || []).length}</span>
                   </div>
                 </div>
               </div>
@@ -601,7 +601,7 @@ export default function Home() {
               {/* Notas */}
               <div className="bg-white rounded-[2rem] border border-slate-100 p-5 space-y-3 flex flex-col">
                 <div className="flex items-center gap-2">
-                  <StickyNote size={12} className="text-[#7CB342]" />
+                  <StickyNote size={12} className="text-[#1E3A8A]" />
                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Notas del CWP</p>
                 </div>
                 <textarea
@@ -609,7 +609,7 @@ export default function Home() {
                   onChange={e => setCwpNotes(prev => ({ ...prev, [selectedCWP.name]: e.target.value }))}
                   placeholder="Agrega notas, observaciones, pendientes..."
                   rows={6}
-                  className="w-full p-3 bg-slate-50 border border-slate-100 rounded-xl text-xs font-medium outline-none focus:border-[#7CB342] resize-none transition-all"
+                  className="w-full p-3 bg-slate-50 border border-slate-100 rounded-xl text-xs font-medium outline-none focus:border-[#1E3A8A] resize-none transition-all"
                 />
                 <p className="text-[8px] text-slate-300 font-bold italic">Guardado automáticamente</p>
               </div>
@@ -644,7 +644,7 @@ export default function Home() {
                   <div className="max-w-sm">
                     <p className="text-xl font-black italic text-slate-700 mb-2">Sin vistas asignadas</p>
                     <p className="text-sm text-slate-400 font-bold italic mb-6">
-                      Agrega vistas personalizadas a este CWP. Cada vista mostrará automáticamente solo los datos de <span className="text-[#7CB342] font-black">{selectedCWP.name}</span>.
+                      Agrega vistas personalizadas a este CWP. Cada vista mostrará automáticamente solo los datos de <span className="text-[#1E3A8A] font-black">{selectedCWP.name}</span>.
                     </p>
                     <button
                       onClick={() => setShowViewPicker(true)}
@@ -658,7 +658,7 @@ export default function Home() {
                 getCwpViews(selectedCWP.name).map(view => (
                   <div key={view.id} className="space-y-4">
                     <div className="flex items-center gap-3">
-                      <div className="h-5 w-1 bg-[#7CB342] rounded-full" />
+                      <div className="h-5 w-1 bg-[#1E3A8A] rounded-full" />
                       <h4 className="text-xl font-black italic text-slate-900">{view.name}</h4>
                       <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">
                         {entities.find(e => e.id === view.entity_id)?.name}
@@ -707,10 +707,10 @@ export default function Home() {
                       <p className={`text-sm font-black italic ${isAssigned ? 'text-white' : 'text-slate-700'}`}>{view.name}</p>
                       <p className={`text-[9px] font-black uppercase tracking-widest mt-0.5 ${isAssigned ? 'text-slate-400' : 'text-slate-300'}`}>
                         {entities.find(e => e.id === view.entity_id)?.name || '—'}
-                        {view.filter_key && <span className="text-[#7CB342] ml-2">· Filtro: {view.filter_key}</span>}
+                        {view.filter_key && <span className="text-[#1E3A8A] ml-2">· Filtro: {view.filter_key}</span>}
                       </p>
                     </div>
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center ${isAssigned ? 'bg-[#7CB342]' : 'bg-white border-2 border-slate-200'}`}>
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center ${isAssigned ? 'bg-[#1E3A8A]' : 'bg-white border-2 border-slate-200'}`}>
                       {isAssigned && <Check size={12} className="text-white" />}
                     </div>
                   </button>
@@ -741,7 +741,7 @@ export default function Home() {
                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Origen</p>
                   <p className="font-black text-slate-900 text-sm">{sourceEntity.name}</p>
                 </div>
-                <ArrowRight size={20} className="text-[#7CB342] shrink-0" />
+                <ArrowRight size={20} className="text-[#1E3A8A] shrink-0" />
                 <div className="flex-1 text-center">
                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Destino</p>
                   <p className="font-black text-slate-900 text-sm">{targetEntity.name}</p>
@@ -757,7 +757,7 @@ export default function Home() {
                   <select
                     value={pendingAttrs.parentAttrId}
                     onChange={e => setPendingAttrs(prev => ({ ...prev, parentAttrId: e.target.value }))}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-[#7CB342]"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-[#1E3A8A]"
                   >
                     <option value="">Seleccionar...</option>
                     {(sourceEntity.attributes || []).map((a: any) => (
@@ -772,7 +772,7 @@ export default function Home() {
                   <select
                     value={pendingAttrs.childAttrId}
                     onChange={e => setPendingAttrs(prev => ({ ...prev, childAttrId: e.target.value }))}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-[#7CB342]"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-[#1E3A8A]"
                   >
                     <option value="">Seleccionar...</option>
                     {(targetEntity.attributes || []).map((a: any) => (
