@@ -31,6 +31,10 @@ import DataEditor from '@/components/editor/DataEditor';
 import CustomViewManager from '@/components/views/CustomViewManager';
 import CWPMatrix from '@/components/matrix/CWPMatrix';
 import GanttChart from '@/components/gantt/GanttChart';
+import LoginPage from '@/components/auth/LoginPage';
+import RolesManager from '@/components/settings/RolesManager';
+import { useAuth } from '@/contexts/AuthContext';
+import { useProject } from '@/contexts/ProjectContext';
 
 // ─── EmbeddedView ─────────────────────────────────────────────────────────────
 const EmbeddedView = ({ viewName, filterValue, customViews, title, entities = [], isCompact = false }: {
@@ -174,6 +178,9 @@ const EmbeddedView = ({ viewName, filterValue, customViews, title, entities = []
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function Home() {
+  const { user, loading: authLoading, hasPermission } = useAuth();
+  const { currentProject } = useProject();
+
   const [activeTab, setActiveTab] = useState<string>('cwp-dashboard');
   const [entities, setEntities] = useState<any[]>([]);
   const [relationships, setRelationships] = useState<any[]>([]);
@@ -201,7 +208,7 @@ export default function Home() {
   const cwpHHMap = useMemo(() => {
     const map: Record<string, { totalHH: number; doneHH: number; pct: number; tasks: any[] }> = {};
     const withCwp = ganttTasks.filter(t => t.cwp?.trim());
-    const codes = [...new Set(withCwp.map(t => t.cwp.trim()))];
+    const codes = Array.from(new Set(withCwp.map(t => t.cwp.trim())));
     codes.forEach(cwp => {
       const group = withCwp.filter(t => t.cwp.trim() === cwp);
       const leaves = group.filter(t => !group.some(o => o.edt.startsWith(t.edt + '.')));
@@ -237,21 +244,31 @@ export default function Home() {
 
   // ─── Carga inicial ────────────────────────────────────────────────────
   const loadInitialData = async () => {
-    const [entRes, relRes, viewRes] = await Promise.all([
-      supabase.from('entities').select('*, attributes(*)'),
-      supabase.from('relationships').select('*, parent_attr:attributes!parent_attribute_id(*, entity:entities(*)), child_attr:attributes!child_attribute_id(*, entity:entities(*))'),
-      supabase.from('custom_views').select('*')
-    ]);
+    if (!user) return;
+
+    // Build queries — filter by project_id when a project is selected
+    let entQuery  = supabase.from('entities').select('*, attributes(*)');
+    let relQuery  = supabase.from('relationships').select('*, parent_attr:attributes!parent_attribute_id(*, entity:entities(*)), child_attr:attributes!child_attribute_id(*, entity:entities(*))');
+    let viewQuery = supabase.from('custom_views').select('*');
+
+    if (currentProject?.id) {
+      entQuery  = entQuery.eq('project_id',  currentProject.id) as typeof entQuery;
+      relQuery  = relQuery.eq('project_id',  currentProject.id) as typeof relQuery;
+      viewQuery = viewQuery.eq('project_id', currentProject.id) as typeof viewQuery;
+    }
+
+    const [entRes, relRes, viewRes] = await Promise.all([entQuery, relQuery, viewQuery]);
     if (entRes.data) {
       setEntities(entRes.data);
       const masterAwp = entRes.data.find((e: any) => e.name.toUpperCase() === 'DATOS GENERALES AWP');
       if (masterAwp) setDashboardEntityId(masterAwp.id);
+      else setDashboardEntityId('');
     }
     if (relRes.data) setRelationships(relRes.data);
     if (viewRes.data) setCustomViews(viewRes.data);
   };
 
-  useEffect(() => { loadInitialData(); }, []);
+  useEffect(() => { loadInitialData(); }, [user, currentProject?.id]);
 
   // ─── Persistencia localStorage ────────────────────────────────────────
   useEffect(() => {
@@ -368,15 +385,33 @@ export default function Home() {
   const sourceEntity = pendingConnection ? entities.find(e => e.id === pendingConnection.source) : null;
   const targetEntity = pendingConnection ? entities.find(e => e.id === pendingConnection.target) : null;
 
+  // ── Auth guard ──────────────────────────────────────────────────────────────
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-brand-deep flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 size={32} className="animate-spin text-brand-electric" />
+          <p className="text-brand-electric/50 text-xs font-black uppercase tracking-widest">Iniciando...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) return <LoginPage />;
+
   return (
     <main className="flex h-screen bg-brand-cloud text-brand-slate font-sans overflow-hidden">
       <Sidebar activeTab={activeTab} onTabChange={setActiveTab} />
 
       <section className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 bg-white/70 backdrop-blur-xl border-b border-white/50 flex items-center px-8 shadow-sm z-10 shrink-0">
+        <Topbar onTabChange={setActiveTab} />
+        <header className="h-10 bg-white/70 backdrop-blur-xl border-b border-white/50 flex items-center px-8 shadow-sm z-10 shrink-0">
           <h2 className="text-xs font-black text-brand-deep/40 uppercase tracking-widest flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-brand-electric animate-pulse" />
-            {activeTab.replace('-', ' ').toUpperCase()}
+            {activeTab.replace(/-/g, ' ').toUpperCase()}
+            {currentProject && (
+              <span className="ml-2 text-brand-deep/20">— {currentProject.name}</span>
+            )}
           </h2>
         </header>
 
@@ -602,6 +637,13 @@ export default function Home() {
           {activeTab === 'programming' && (
             <div className="h-[calc(100vh-64px)] w-full">
               <GanttChart />
+            </div>
+          )}
+
+          {/* ─── Settings / Roles ─── */}
+          {activeTab === 'settings' && (
+            <div className="overflow-y-auto">
+              <RolesManager />
             </div>
           )}
 

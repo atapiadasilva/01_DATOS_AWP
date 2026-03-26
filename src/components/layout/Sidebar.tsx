@@ -4,8 +4,10 @@ import React, { useState } from 'react';
 import {
   Star, Briefcase, Users, FileText, Calendar,
   FolderGit2, ChevronDown, ChevronRight, Activity,
-  Network, CheckSquare, Search, GitMerge, ShoppingCart, LayoutGrid, Grid3x3
+  Network, CheckSquare, Search, GitMerge, ShoppingCart, LayoutGrid, Grid3x3, Settings, Crown
 } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { ROLE_COLORS, ROLE_LABELS } from '@/lib/permissions';
 
 interface SidebarProps {
   activeTab: string;
@@ -13,6 +15,7 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
+  const { role } = useAuth();
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     favoritos:    true,
     gestion:      true,
@@ -130,12 +133,20 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
         </NavSection>
 
         <NavSection id="proyectos" label="Proyectos" icon={FolderGit2} />
+
+        {role === 'admin' && (
+          <NavSection id="config" label="Administración" icon={Settings}>
+            <NavItem id="settings" label="Configuración & Roles" icon={Crown} />
+          </NavSection>
+        )}
       </div>
 
       {/* ── Footer ── */}
       <div className="px-4 py-3 border-t border-brand-cloud flex items-center justify-between shrink-0 bg-brand-cloud/30">
-        <span className="text-[9px] font-black text-brand-slate/30 uppercase tracking-widest">v26.1.0</span>
-        <span className="px-2 py-0.5 bg-brand-electric/10 text-brand-electric text-[8px] font-black rounded-full uppercase tracking-widest border border-brand-electric/20">DataPower Engine</span>
+        <span className="text-[9px] font-black text-brand-slate/30 uppercase tracking-widest">v3.0.0</span>
+        <span className={`px-2 py-0.5 text-[8px] font-black rounded-full uppercase tracking-widest border ${ROLE_COLORS[role]}`}>
+          {ROLE_LABELS[role]}
+        </span>
       </div>
     </aside>
   );
