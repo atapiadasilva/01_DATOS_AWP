@@ -8,7 +8,8 @@ import {
   BarChart3, Layers, Search, Eye,
   ArrowUp, ArrowDown,
   Link, Unlink, Edit3, StickyNote,
-  TrendingUp, Clock, Target, ChevronDown
+  TrendingUp, Clock, Target, ChevronDown,
+  Camera, BookOpen, FileEdit
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import * as XLSX from 'xlsx';
@@ -33,8 +34,50 @@ import CWPMatrix from '@/components/matrix/CWPMatrix';
 import GanttChart from '@/components/gantt/GanttChart';
 import LoginPage from '@/components/auth/LoginPage';
 import RolesManager from '@/components/settings/RolesManager';
+import CWPPhotoGallery from '@/components/cwp/CWPPhotoGallery';
+import CWPReportEditor from '@/components/cwp/CWPReportEditor';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
+
+// ─── Discipline color system ──────────────────────────────────────────────────
+const DISC_COLORS: Record<string, { bg: string; text: string; border: string; accent: string }> = {
+  'CIVIL':              { bg: '#f0fdf4', text: '#15803d', border: '#bbf7d0', accent: '#22c55e' },
+  'ESTRUCTURA':         { bg: '#eff6ff', text: '#1d4ed8', border: '#bfdbfe', accent: '#3b82f6' },
+  'ESTRUCTURAL':        { bg: '#eff6ff', text: '#1d4ed8', border: '#bfdbfe', accent: '#3b82f6' },
+  'MECANICO':           { bg: '#fff7ed', text: '#c2410c', border: '#fed7aa', accent: '#f97316' },
+  'MECÁNICO':           { bg: '#fff7ed', text: '#c2410c', border: '#fed7aa', accent: '#f97316' },
+  'MECANICA':           { bg: '#fff7ed', text: '#c2410c', border: '#fed7aa', accent: '#f97316' },
+  'MECÁNICA':           { bg: '#fff7ed', text: '#c2410c', border: '#fed7aa', accent: '#f97316' },
+  'ELECTRICO':          { bg: '#fefce8', text: '#a16207', border: '#fef08a', accent: '#eab308' },
+  'ELÉCTRICO':          { bg: '#fefce8', text: '#a16207', border: '#fef08a', accent: '#eab308' },
+  'ELECTRICA':          { bg: '#fefce8', text: '#a16207', border: '#fef08a', accent: '#eab308' },
+  'ELÉCTRICA':          { bg: '#fefce8', text: '#a16207', border: '#fef08a', accent: '#eab308' },
+  'INSTRUMENTACION':    { bg: '#faf5ff', text: '#7e22ce', border: '#e9d5ff', accent: '#a855f7' },
+  'INSTRUMENTACIÓN':    { bg: '#faf5ff', text: '#7e22ce', border: '#e9d5ff', accent: '#a855f7' },
+  'PIPING':             { bg: '#fff1f2', text: '#be123c', border: '#fecdd3', accent: '#f43f5e' },
+  'TUBERIAS':           { bg: '#fff1f2', text: '#be123c', border: '#fecdd3', accent: '#f43f5e' },
+  'TUBERÍAS':           { bg: '#fff1f2', text: '#be123c', border: '#fecdd3', accent: '#f43f5e' },
+  'HVAC':               { bg: '#f0fdfa', text: '#0f766e', border: '#99f6e4', accent: '#14b8a6' },
+  'ARQUITECTURA':       { bg: '#fdf2f8', text: '#9d174d', border: '#fbcfe8', accent: '#ec4899' },
+  'PINTURA':            { bg: '#fffbeb', text: '#92400e', border: '#fde68a', accent: '#d97706' },
+  'AISLACION':          { bg: '#f8fafc', text: '#475569', border: '#e2e8f0', accent: '#94a3b8' },
+  'AISLACIÓN':          { bg: '#f8fafc', text: '#475569', border: '#e2e8f0', accent: '#94a3b8' },
+  'GENERAL':            { bg: '#f1f5f9', text: '#334155', border: '#e2e8f0', accent: '#64748b' },
+};
+const DISC_FALLBACK = [
+  { bg: '#f0f9ff', text: '#0369a1', border: '#bae6fd', accent: '#0ea5e9' },
+  { bg: '#f5f3ff', text: '#5b21b6', border: '#ddd6fe', accent: '#8b5cf6' },
+  { bg: '#fff0f6', text: '#9d174d', border: '#fbcfe8', accent: '#db2777' },
+  { bg: '#f0fdf0', text: '#166534', border: '#bbf7d0', accent: '#16a34a' },
+  { bg: '#fff8f0', text: '#9a3412', border: '#fed7aa', accent: '#ea580c' },
+];
+function getDiscColor(discipline: string) {
+  const k = discipline.toUpperCase().trim();
+  if (DISC_COLORS[k]) return DISC_COLORS[k];
+  let hash = 0;
+  for (let i = 0; i < k.length; i++) hash = (hash * 31 + k.charCodeAt(i)) & 0xffff;
+  return DISC_FALLBACK[hash % DISC_FALLBACK.length];
+}
 
 // ─── EmbeddedView ─────────────────────────────────────────────────────────────
 const EmbeddedView = ({ viewName, filterValue, customViews, title, entities = [], isCompact = false }: {
@@ -189,10 +232,13 @@ export default function Home() {
   const [dashboardEntityId, setDashboardEntityId] = useState<string>('');
   const [cwpGroups, setCwpGroups] = useState<Record<string, Record<string, any>>>({});
   const [isLoadingDashboard, setIsLoadingDashboard] = useState(false);
+  const [officialDisciplines, setOfficialDisciplines] = useState<string[]>([]);
 
   // ─── CWP Dashboard: búsqueda y notas ──────────────────────────
   const [cwpSearch, setCwpSearch] = useState('');
   const [cwpNotes, setCwpNotes] = useState<Record<string, string>>({});
+  const [selectedCWPTab, setSelectedCWPTab] = useState<'programa' | 'evidencia' | 'reporte'>('programa');
+  const [showReportEditor, setShowReportEditor] = useState(false);
 
   // ─── HH del Programa (de gantt_program.json) ─────────────────
   const [ganttTasks, setGanttTasks] = useState<any[]>([]);
@@ -263,6 +309,25 @@ export default function Home() {
       const masterAwp = entRes.data.find((e: any) => e.name.toUpperCase() === 'DATOS GENERALES AWP');
       if (masterAwp) setDashboardEntityId(masterAwp.id);
       else setDashboardEntityId('');
+
+      // Buscar entidad CWP x Disciplina para disciplinas oficiales
+      const cwpDiscEntity = entRes.data.find((e: any) => {
+        const n = e.name.toUpperCase().replace(/\s+/g, ' ').trim();
+        return (n.includes('CWP') && (n.includes('DISCIPLINA') || n.includes('DISCIPLINE'))) ||
+               n === 'CWP X DISCIPLINA' || n === 'CWP POR DISCIPLINA' || n === 'CWP DISCIPLINA';
+      });
+      if (cwpDiscEntity) {
+        supabase.from('data_records').select('data').eq('entity_id', cwpDiscEntity.id)
+          .then(({ data: dr }) => {
+            if (dr) {
+              const discs = Array.from(new Set(
+                dr.map((r: any) => String(r.data?.DISCIPLINA || r.data?.DISCIPLINE || '').toUpperCase().trim())
+                  .filter(Boolean)
+              )).sort() as string[];
+              setOfficialDisciplines(discs);
+            }
+          });
+      }
     }
     if (relRes.data) setRelationships(relRes.data);
     if (viewRes.data) setCustomViews(viewRes.data);
@@ -293,8 +358,12 @@ export default function Home() {
             const rd = r.data || {};
             const cwpName = String(rd.CWP || rd.PACKAGE || 'SC-CWP');
             const discName = String(rd.DISCIPLINA || rd.DISCIPLINE || 'GENERAL').toUpperCase();
+            const displayName = String(rd.NOMBRE_CWP || rd.NOMBRE_PAQUETE || rd.NOMBRE || rd.DESCRIPCION || rd.DESCRIPTION || '');
             if (!groups[discName]) groups[discName] = {};
-            if (!groups[discName][cwpName]) groups[discName][cwpName] = { name: cwpName, activities: 0, discipline: discName, hh: 0, progress: 0 };
+            if (!groups[discName][cwpName]) groups[discName][cwpName] = { name: cwpName, displayName: '', activities: 0, discipline: discName, hh: 0, progress: 0 };
+            if (!groups[discName][cwpName].displayName && displayName && displayName !== cwpName) {
+              groups[discName][cwpName].displayName = displayName;
+            }
             groups[discName][cwpName].activities++;
             groups[discName][cwpName].hh += Number(rd.HH || 0);
           });
@@ -442,35 +511,82 @@ export default function Home() {
                 </span>
               </div>
 
+              {/* ── Simbología de disciplinas ── */}
+              {(officialDisciplines.length > 0 || Object.keys(cwpGroups).length > 0) && (
+                <div className="mb-6 p-4 bg-white rounded-2xl border border-brand-cloud shadow-sm">
+                  <div className="flex items-center gap-2 mb-3">
+                    <p className="text-[8px] font-black text-slate-300 uppercase tracking-widest">Simbología de Disciplinas</p>
+                    {officialDisciplines.length > 0 && (
+                      <span className="text-[7px] font-black px-1.5 py-0.5 rounded-full bg-brand-electric/10 text-brand-electric uppercase tracking-wider">oficial</span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    {(officialDisciplines.length > 0 ? officialDisciplines : Object.keys(cwpGroups)).map(disc => {
+                      const c = getDiscColor(disc);
+                      const cwpCount = cwpGroups[disc] ? Object.keys(cwpGroups[disc]).length : null;
+                      return (
+                        <div key={disc} className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[9px] font-black uppercase tracking-widest"
+                          style={{ backgroundColor: c.bg, color: c.text, borderColor: c.border }}>
+                          <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: c.accent }} />
+                          {disc}
+                          {cwpCount !== null && (
+                            <span className="ml-1 opacity-60">{cwpCount}</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Grilla de CWPs por disciplina */}
               {Object.entries(cwpGroups).map(([discipline, cwps]) => {
                 const disciplineCwps = Object.values(cwps).filter((cwp: any) => filteredCwps.includes(cwp));
                 if (disciplineCwps.length === 0) return null;
                 return (
                   <div key={discipline} className="mb-8">
+                    {(() => { const dc = getDiscColor(discipline); return (
                     <div className="flex items-center gap-3 mb-3">
-                      <div className="h-4 w-1 bg-brand-electric rounded-full shadow-[0_0_8px_rgba(0,191,255,0.5)]" />
-                      <h3 className="text-xs font-black text-brand-deep/60 uppercase tracking-widest">{discipline}</h3>
-                      <span className="text-[9px] text-brand-slate/30 font-bold">({disciplineCwps.length})</span>
+                      <div className="h-4 w-1.5 rounded-full" style={{ backgroundColor: dc.accent }} />
+                      <h3 className="text-xs font-black uppercase tracking-widest" style={{ color: dc.text }}>{discipline}</h3>
+                      <span className="text-[9px] font-black px-2 py-0.5 rounded-full border" style={{ backgroundColor: dc.bg, color: dc.text, borderColor: dc.border }}>
+                        {disciplineCwps.length} CWP{disciplineCwps.length !== 1 ? 's' : ''}
+                      </span>
                     </div>
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                    ); })()}
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                       {disciplineCwps.map((cwp: any) => {
                         const globalViewCount = getCwpViews().length;
                         const hhData = getCwpHHData(cwp.name);
                         // HH a mostrar: preferir Gantt, luego Supabase
                         const displayHH = hhData?.totalHH ?? cwp.hh ?? 0;
                         const displayPct = hhData?.pct ?? 0;
+                        const dc = getDiscColor(discipline);
                         return (
                           <div
                             key={cwp.name}
-                            onClick={() => setSelectedCWP(cwp)}
-                            className="bg-white/80 backdrop-blur-md p-5 rounded-[2rem] border border-white shadow-lg shadow-brand-deep/5 cursor-pointer hover:shadow-2xl hover:scale-[1.02] hover:border-brand-electric/30 transition-all group relative overflow-hidden"
+                            onClick={() => { setSelectedCWP(cwp); setSelectedCWPTab('programa'); }}
+                            className="bg-white/90 backdrop-blur-md p-5 rounded-[1.75rem] shadow-lg shadow-brand-deep/5 cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all group relative overflow-hidden min-h-[170px] flex flex-col"
+                            style={{ borderWidth: '1px', borderStyle: 'solid', borderColor: dc.border, borderLeftWidth: '4px', borderLeftColor: dc.accent }}
                           >
                             <div className="absolute top-0 right-0 p-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <ArrowRight size={14} className="text-brand-electric" />
+                              <ArrowRight size={12} style={{ color: dc.accent }} />
                             </div>
-                            <h5 className="text-sm font-black text-brand-deep truncate group-hover:text-brand-electric transition-colors">{cwp.name}</h5>
-                            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-1">{cwp.activities} Act.</p>
+                            {/* Badge disciplina */}
+                            <div className="inline-flex items-center gap-1.5 self-start px-2 py-0.5 rounded-full mb-2.5 text-[8px] font-black uppercase tracking-widest border shrink-0"
+                              style={{ backgroundColor: dc.bg, color: dc.text, borderColor: dc.border }}>
+                              <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: dc.accent }} />
+                              {cwp.discipline}
+                            </div>
+                            {/* Descripción CWP — texto principal grande */}
+                            <h5 className="text-[15px] font-black text-slate-800 group-hover:text-brand-deep transition-colors line-clamp-2 leading-snug pr-5">
+                              {cwp.displayName || cwp.name}
+                            </h5>
+                            {/* Código CWP — secundario pequeño */}
+                            <p className="text-[9px] font-black uppercase tracking-widest mt-1" style={{ color: dc.text, opacity: 0.7 }}>
+                              {cwp.displayName ? cwp.name : ''}
+                            </p>
+                            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">{cwp.activities} Act.</p>
 
                             {/* HH del programa */}
                             {displayHH > 0 && (
@@ -495,10 +611,11 @@ export default function Home() {
                               </div>
                             )}
 
+                            <div className="flex-1" />
                             {globalViewCount > 0 && (
                               <div className="mt-2 flex items-center gap-1">
-                                <Layout size={9} className="text-brand-electric" />
-                                <span className="text-[9px] font-black text-brand-electric">{globalViewCount} vistas</span>
+                                <Layout size={9} style={{ color: dc.accent }} />
+                                <span className="text-[9px] font-black" style={{ color: dc.text }}>{globalViewCount} vistas</span>
                               </div>
                             )}
                           </div>
@@ -627,7 +744,7 @@ export default function Home() {
                 entities={entities}
                 onSelectCWP={(cwpName) => {
                   const found = allCwps.find((c: any) => c.name === cwpName);
-                  if (found) { setSelectedCWP(found); setActiveTab('cwp-dashboard'); }
+                  if (found) { setSelectedCWP(found); setSelectedCWPTab('programa'); setActiveTab('cwp-dashboard'); }
                 }}
               />
             </div>
@@ -670,15 +787,45 @@ export default function Home() {
                 <X size={18} />
               </button>
               <div>
-                <h3 className="text-lg font-black italic leading-none">{selectedCWP.name}</h3>
-                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-0.5">{selectedCWP.discipline}</p>
+                <h3 className="text-lg font-black italic leading-none">
+                  {selectedCWP.displayName || selectedCWP.name}
+                </h3>
+                <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest mt-0.5">
+                  {selectedCWP.displayName ? `${selectedCWP.name} · ` : ''}{selectedCWP.discipline}
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-3">
+              <button
+                onClick={() => setShowReportEditor(true)}
+                className="px-4 py-2 bg-brand-electric/20 text-brand-electric rounded-xl text-[10px] font-black uppercase flex items-center gap-2 hover:bg-brand-electric/30 transition-all border border-brand-electric/30"
+              >
+                <FileEdit size={12} /> Editor de Reporte
+              </button>
               <button onClick={() => window.print()} className="px-5 py-2 bg-white/10 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-white/20 transition-all">
-                Imprimir
+                <Printer size={12} className="inline mr-1.5" />Imprimir
               </button>
             </div>
+          </div>
+
+          {/* Tab bar */}
+          <div className="h-11 bg-white border-b border-brand-cloud flex items-center px-6 gap-1 shrink-0 print:hidden">
+            {([
+              { id: 'programa', label: 'Programa & Vistas', icon: BarChart3 },
+              { id: 'evidencia', label: 'Evidencia Fotográfica', icon: Camera },
+            ] as { id: 'programa' | 'evidencia' | 'reporte'; label: string; icon: any }[]).map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => setSelectedCWPTab(id)}
+                className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                  selectedCWPTab === id
+                    ? 'bg-brand-deep text-white shadow'
+                    : 'text-slate-400 hover:text-slate-700 hover:bg-brand-cloud'
+                }`}
+              >
+                <Icon size={11} /> {label}
+              </button>
+            ))}
           </div>
 
           {/* Body */}
@@ -808,8 +955,13 @@ export default function Home() {
               )}
             </div>
 
-            {/* Área principal: HH + vistas del CWP */}
-            <div className="flex-1 overflow-y-auto p-10 space-y-10">
+            {/* Área principal: tabbed content */}
+            {selectedCWPTab === 'evidencia' && (
+              <div className="flex-1 overflow-y-auto p-10">
+                <CWPPhotoGallery cwpName={selectedCWP.name} discipline={selectedCWP.discipline} />
+              </div>
+            )}
+            <div className={`flex-1 overflow-y-auto p-10 space-y-10 ${selectedCWPTab !== 'programa' ? 'hidden' : ''}`}>
 
               {/* ─── Tabla HH del programa para este CWP ─── */}
               {(() => {
@@ -957,6 +1109,16 @@ export default function Home() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ─────────────────── EDITOR DE REPORTE CWP ─────────────────── */}
+      {showReportEditor && selectedCWP && (
+        <CWPReportEditor
+          cwp={selectedCWP}
+          hhData={(() => { const d = getCwpHHData(selectedCWP.name); return d && d.totalHH > 0 ? d : null; })()}
+          customViews={customViews}
+          onClose={() => setShowReportEditor(false)}
+        />
       )}
 
       {/* ─────────────────── MODAL CONEXIÓN NODAL ─────────────────── */}

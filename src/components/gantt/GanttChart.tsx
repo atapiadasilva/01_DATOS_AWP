@@ -82,6 +82,7 @@ export default function GanttChart() {
   const [dayW, setDayW]         = useState(3);
   const [search, setSearch]     = useState('');
   const [expandDepth, setExpandDepth] = useState(2);
+  const [cwpFilter, setCwpFilter] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
 
   // ── Load data ──────────────────────────────────────────────────────────────
@@ -118,6 +119,12 @@ export default function GanttChart() {
       .catch(() => setLoading(false));
   }, []);
 
+  // ── Unique CWP codes ───────────────────────────────────────────────────────
+  const cwpCodes = useMemo(() => {
+    const codes = Array.from(new Set(tasks.map(t => t.cwp).filter(c => c?.trim())));
+    return codes.sort();
+  }, [tasks]);
+
   // ── Parent set ─────────────────────────────────────────────────────────────
   const parentSet = useMemo(() => {
     const s = new Set<string>();
@@ -149,11 +156,24 @@ export default function GanttChart() {
   // ── Visible tasks ──────────────────────────────────────────────────────────
   const visibleTasks = useMemo(() => {
     const q = search.toLowerCase();
+
+    // When filtering by CWP: show matching leaves + their ancestors (parents expand automatically)
+    let allowedEdts: Set<string> | null = null;
+    if (cwpFilter) {
+      allowedEdts = new Set<string>();
+      tasks.filter(t => t.cwp?.trim() === cwpFilter).forEach(t => {
+        allowedEdts!.add(t.edt);
+        getAncestors(t.edt).forEach(a => allowedEdts!.add(a));
+      });
+    }
+
     return tasks.filter(t => {
+      if (allowedEdts && !allowedEdts.has(t.edt)) return false;
       if (q && !t.name.toLowerCase().includes(q) && !t.edt.includes(q)) return false;
+      if (cwpFilter) return true; // ancestors always visible when CWP filter active
       return getAncestors(t.edt).every(a => !collapsed.has(a));
     });
-  }, [tasks, collapsed, search]);
+  }, [tasks, collapsed, search, cwpFilter]);
 
   // ── Timeline ───────────────────────────────────────────────────────────────
   const { dispStart, months, totalDispDays } = useMemo(() => {
@@ -269,8 +289,30 @@ export default function GanttChart() {
           placeholder="Buscar actividad o EDT..."
           value={search}
           onChange={e => setSearch(e.target.value)}
-          className="w-52 px-3 py-1.5 bg-brand-cloud/60 border border-brand-cloud rounded-lg text-[11px] font-bold outline-none focus:border-brand-electric text-brand-slate"
+          className="w-48 px-3 py-1.5 bg-brand-cloud/60 border border-brand-cloud rounded-lg text-[11px] font-bold outline-none focus:border-brand-electric text-brand-slate"
         />
+
+        {/* CWP filter */}
+        <select
+          value={cwpFilter}
+          onChange={e => setCwpFilter(e.target.value)}
+          className={`px-3 py-1.5 border rounded-lg text-[11px] font-bold outline-none transition-all ${
+            cwpFilter
+              ? 'bg-brand-electric/10 border-brand-electric text-brand-electric'
+              : 'bg-brand-cloud/60 border-brand-cloud text-brand-slate/60 focus:border-brand-electric'
+          }`}
+        >
+          <option value="">Todos los CWP</option>
+          {cwpCodes.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        {cwpFilter && (
+          <button
+            onClick={() => setCwpFilter('')}
+            className="px-2 py-1.5 bg-brand-electric/10 text-brand-electric rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-brand-electric/20 transition-all"
+          >
+            ✕ Limpiar
+          </button>
+        )}
 
         <div className="w-px h-5 bg-slate-200 mx-1" />
 
