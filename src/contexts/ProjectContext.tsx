@@ -11,7 +11,7 @@ export interface Project {
   name: string;
   description?: string;
   created_at: string;
-  owner_id: string;
+  user_id: string;
 }
 
 interface ProjectContextValue {
@@ -74,7 +74,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     if (!user) return null;
     const { data, error } = await supabase
       .from('projects')
-      .insert({ name: name.trim(), description: description?.trim() || null, owner_id: user.id })
+      .insert({ name: name.trim(), description: description?.trim() || null, user_id: user.id })
       .select()
       .single();
     if (!error && data) {
