@@ -29,6 +29,7 @@ import WBSTreeView from '@/components/tree/WBSTreeView';
 import DataEditor from '@/components/editor/DataEditor';
 import CustomViewManager from '@/components/views/CustomViewManager';
 import CWPMatrix from '@/components/matrix/CWPMatrix';
+import GanttChart from '@/components/gantt/GanttChart';
 
 // ─── EmbeddedView ─────────────────────────────────────────────────────────────
 const EmbeddedView = ({ viewName, filterValue, customViews, title, entities = [], isCompact = false }: {
@@ -533,8 +534,15 @@ export default function Home() {
             </div>
           )}
 
+          {/* ─── CARTA GANTT ─── */}
+          {activeTab === 'programming' && (
+            <div className="h-[calc(100vh-64px)] w-full">
+              <GanttChart />
+            </div>
+          )}
+
           {/* ─── Módulos pendientes ─── */}
-          {['programming', 'drawing-log'].includes(activeTab) && (
+          {['drawing-log'].includes(activeTab) && (
             <div className="p-10 flex items-center justify-center min-h-full">
               <div className="p-12 bg-white rounded-[3rem] border border-slate-100 shadow-xl text-center max-w-md">
                 <h3 className="text-xl font-black mb-3 italic uppercase">{activeTab}</h3>
