@@ -47,21 +47,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session: s } }) => {
-      setSession(s);
-      setUser(s?.user ?? null);
-      if (s?.user) loadUserRole(s.user.id);
-      setLoading(false);
-    });
+    // Timeout de seguridad: si Supabase no responde en 6s, liberar loading
+    const timeout = setTimeout(() => setLoading(false), 6000);
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+    // onAuthStateChange dispara INITIAL_SESSION en Supabase v2 — es la forma más confiable
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, s) => {
       setSession(s);
       setUser(s?.user ?? null);
       if (s?.user) loadUserRole(s.user.id);
       else setRole('viewer');
+      // INITIAL_SESSION es el primer evento — libera el loading
+      if (event === 'INITIAL_SESSION') {
+        clearTimeout(timeout);
+        setLoading(false);
+      }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      clearTimeout(timeout);
+      subscription.unsubscribe();
+    };
   }, [loadUserRole]);
 
   const signIn = async (email: string, password: string): Promise<{ error: string | null }> => {
