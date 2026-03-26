@@ -28,6 +28,7 @@ import IntegrityAudit from '@/components/audit/IntegrityAudit';
 import WBSTreeView from '@/components/tree/WBSTreeView';
 import DataEditor from '@/components/editor/DataEditor';
 import CustomViewManager from '@/components/views/CustomViewManager';
+import CWPMatrix from '@/components/matrix/CWPMatrix';
 
 // ─── EmbeddedView ─────────────────────────────────────────────────────────────
 const EmbeddedView = ({ viewName, filterValue, customViews, title, entities = [], isCompact = false }: {
@@ -180,12 +181,9 @@ export default function Home() {
   const [cwpGroups, setCwpGroups] = useState<Record<string, Record<string, any>>>({});
   const [isLoadingDashboard, setIsLoadingDashboard] = useState(false);
 
-  // ─── CWP Dashboard: búsqueda y asignaciones ──────────────────────────
+  // ─── CWP Dashboard: búsqueda y notas ──────────────────────────
   const [cwpSearch, setCwpSearch] = useState('');
   const [cwpNotes, setCwpNotes] = useState<Record<string, string>>({});
-  const [cwpAssignments, setCwpAssignments] = useState<Record<string, string[]>>({});
-  const [showViewPicker, setShowViewPicker] = useState(false);
-  const [cwpDetailTab, setCwpDetailTab] = useState<'views' | 'notes'>('views');
 
   // ─── Upload ──────────────────────────────────────────────────────────
   const [selectedEntityForUpload, setSelectedEntityForUpload] = useState('');
@@ -220,15 +218,9 @@ export default function Home() {
 
   // ─── Persistencia localStorage ────────────────────────────────────────
   useEffect(() => {
-    const stored = localStorage.getItem('awp_cwp_assignments');
-    if (stored) setCwpAssignments(JSON.parse(stored));
     const storedNotes = localStorage.getItem('awp_cwp_notes');
     if (storedNotes) setCwpNotes(JSON.parse(storedNotes));
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem('awp_cwp_assignments', JSON.stringify(cwpAssignments));
-  }, [cwpAssignments]);
 
   useEffect(() => {
     localStorage.setItem('awp_cwp_notes', JSON.stringify(cwpNotes));
@@ -259,21 +251,8 @@ export default function Home() {
     loadDashboardData();
   }, [dashboardEntityId, activeTab]);
 
-  // ─── Asignación de vistas a CWP ──────────────────────────────────────
-  const toggleViewInCwp = (cwpName: string, viewId: string) => {
-    setCwpAssignments(prev => {
-      const current = prev[cwpName] || [];
-      const next = current.includes(viewId)
-        ? current.filter(id => id !== viewId)
-        : [...current, viewId];
-      return { ...prev, [cwpName]: next };
-    });
-  };
-
-  const getCwpViews = (cwpName: string) => {
-    const ids = cwpAssignments[cwpName] || [];
-    return customViews.filter(v => ids.includes(v.id));
-  };
+  // ─── Vistas globales (todas las vistas con filter_key activo) ────────
+  const getCwpViews = () => customViews.filter(v => v.filter_key);
 
   // ─── Modal confirmación de relación ──────────────────────────────────
   const confirmRelationship = async () => {
@@ -403,19 +382,19 @@ export default function Home() {
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                       {disciplineCwps.map((cwp: any) => {
-                        const assignedCount = (cwpAssignments[cwp.name] || []).length;
+                        const globalViewCount = getCwpViews().length;
                         return (
                           <div
                             key={cwp.name}
-                            onClick={() => { setSelectedCWP(cwp); setCwpDetailTab('views'); }}
+                            onClick={() => setSelectedCWP(cwp)}
                             className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-md cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all group"
                           >
                             <h5 className="text-sm font-black text-slate-900 truncate group-hover:text-[#1E3A8A] transition-colors">{cwp.name}</h5>
                             <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-1">{cwp.activities} Act.</p>
-                            {assignedCount > 0 && (
+                            {globalViewCount > 0 && (
                               <div className="mt-2 flex items-center gap-1">
                                 <Layout size={9} className="text-[#1E3A8A]" />
-                                <span className="text-[9px] font-black text-[#1E3A8A]">{assignedCount} vistas</span>
+                                <span className="text-[9px] font-black text-[#1E3A8A]">{globalViewCount} vistas</span>
                               </div>
                             )}
                           </div>
@@ -535,6 +514,21 @@ export default function Home() {
             </div>
           )}
 
+          {/* ─── MATRIZ CWP ─── */}
+          {activeTab === 'matrix' && (
+            <div className="h-[calc(100vh-64px)] w-full overflow-auto">
+              <CWPMatrix
+                cwpGroups={cwpGroups}
+                customViews={customViews}
+                entities={entities}
+                onSelectCWP={(cwpName) => {
+                  const found = allCwps.find((c: any) => c.name === cwpName);
+                  if (found) { setSelectedCWP(found); setActiveTab('cwp-dashboard'); }
+                }}
+              />
+            </div>
+          )}
+
           {/* ─── Módulos pendientes ─── */}
           {['programming', 'drawing-log'].includes(activeTab) && (
             <div className="p-10 flex items-center justify-center min-h-full">
@@ -563,12 +557,6 @@ export default function Home() {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <button
-                onClick={() => setShowViewPicker(true)}
-                className="px-5 py-2 bg-[#1E3A8A]/20 text-[#1E3A8A] border border-[#1E3A8A]/30 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-[#1E3A8A]/30 transition-all"
-              >
-                <Plus size={13} /> Añadir Vista
-              </button>
               <button onClick={() => window.print()} className="px-5 py-2 bg-white/10 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-white/20 transition-all">
                 Imprimir
               </button>
@@ -592,8 +580,8 @@ export default function Home() {
                     <span className="text-sm font-black text-slate-900">{selectedCWP.hh?.toLocaleString() || 0}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-slate-500">Vistas asignadas</span>
-                    <span className="text-sm font-black text-[#1E3A8A]">{(cwpAssignments[selectedCWP.name] || []).length}</span>
+                    <span className="text-[10px] font-bold text-slate-500">Vistas activas</span>
+                    <span className="text-sm font-black text-[#1E3A8A]">{getCwpViews().length}</span>
                   </div>
                 </div>
               </div>
@@ -614,20 +602,13 @@ export default function Home() {
                 <p className="text-[8px] text-slate-300 font-bold italic">Guardado automáticamente</p>
               </div>
 
-              {/* Lista de vistas asignadas (acceso rápido) */}
-              {getCwpViews(selectedCWP.name).length > 0 && (
+              {/* Lista de vistas activas (acceso rápido) */}
+              {getCwpViews().length > 0 && (
                 <div className="bg-white rounded-[2rem] border border-slate-100 p-5 space-y-2">
                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Módulos activos</p>
-                  {getCwpViews(selectedCWP.name).map(view => (
-                    <div key={view.id} className="flex items-center justify-between py-1">
+                  {getCwpViews().map(view => (
+                    <div key={view.id} className="flex items-center py-1">
                       <span className="text-[10px] font-black text-slate-700 truncate">{view.name}</span>
-                      <button
-                        onClick={() => toggleViewInCwp(selectedCWP.name, view.id)}
-                        className="p-1 text-slate-200 hover:text-red-400 transition-colors ml-2 shrink-0"
-                        title="Quitar vista"
-                      >
-                        <X size={11} />
-                      </button>
                     </div>
                   ))}
                 </div>
@@ -636,26 +617,20 @@ export default function Home() {
 
             {/* Área principal: vistas del CWP */}
             <div className="flex-1 overflow-y-auto p-10 space-y-10">
-              {getCwpViews(selectedCWP.name).length === 0 ? (
+              {getCwpViews().length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-80 gap-6 text-center">
                   <div className="w-24 h-24 bg-slate-50 rounded-[2.5rem] flex items-center justify-center text-slate-200 shadow-inner">
                     <Layout size={48} />
                   </div>
                   <div className="max-w-sm">
-                    <p className="text-xl font-black italic text-slate-700 mb-2">Sin vistas asignadas</p>
-                    <p className="text-sm text-slate-400 font-bold italic mb-6">
-                      Agrega vistas personalizadas a este CWP. Cada vista mostrará automáticamente solo los datos de <span className="text-[#1E3A8A] font-black">{selectedCWP.name}</span>.
+                    <p className="text-xl font-black italic text-slate-700 mb-2">Sin vistas configuradas</p>
+                    <p className="text-sm text-slate-400 font-bold italic">
+                      Crea vistas personalizadas con un filtro activo en el módulo <span className="text-[#1E3A8A] font-black">Vistas Personalizadas</span>. Aparecerán aquí automáticamente para todos los CWPs.
                     </p>
-                    <button
-                      onClick={() => setShowViewPicker(true)}
-                      className="px-8 py-3 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-3 mx-auto hover:bg-slate-800 transition-all"
-                    >
-                      <Plus size={16} /> Añadir Primera Vista
-                    </button>
                   </div>
                 </div>
               ) : (
-                getCwpViews(selectedCWP.name).map(view => (
+                getCwpViews().map(view => (
                   <div key={view.id} className="space-y-4">
                     <div className="flex items-center gap-3">
                       <div className="h-5 w-1 bg-[#1E3A8A] rounded-full" />
@@ -673,54 +648,6 @@ export default function Home() {
                   </div>
                 ))
               )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ─────────────────── PICKER DE VISTAS ─────────────────── */}
-      {showViewPicker && selectedCWP && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-6">
-          <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl overflow-hidden flex flex-col">
-            <div className="p-8 border-b border-slate-100 flex justify-between items-center">
-              <div>
-                <h3 className="text-xl font-black italic text-slate-900">Añadir Vista al CWP</h3>
-                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-1">{selectedCWP.name}</p>
-              </div>
-              <button onClick={() => setShowViewPicker(false)} className="text-slate-300 hover:text-slate-600 transition-colors"><X size={20} /></button>
-            </div>
-            <div className="p-6 overflow-y-auto max-h-[55vh] space-y-2">
-              {customViews.length === 0 && (
-                <p className="text-center text-slate-300 italic font-bold text-sm py-10">Crea vistas en el módulo Vistas Maestras primero.</p>
-              )}
-              {customViews.map(view => {
-                const isAssigned = (cwpAssignments[selectedCWP.name] || []).includes(view.id);
-                return (
-                  <button
-                    key={view.id}
-                    onClick={() => toggleViewInCwp(selectedCWP.name, view.id)}
-                    className={`w-full flex items-center justify-between p-5 rounded-[2rem] transition-all ${
-                      isAssigned ? 'bg-slate-900 text-white' : 'bg-slate-50 hover:bg-slate-100'
-                    }`}
-                  >
-                    <div className="text-left">
-                      <p className={`text-sm font-black italic ${isAssigned ? 'text-white' : 'text-slate-700'}`}>{view.name}</p>
-                      <p className={`text-[9px] font-black uppercase tracking-widest mt-0.5 ${isAssigned ? 'text-slate-400' : 'text-slate-300'}`}>
-                        {entities.find(e => e.id === view.entity_id)?.name || '—'}
-                        {view.filter_key && <span className="text-[#1E3A8A] ml-2">· Filtro: {view.filter_key}</span>}
-                      </p>
-                    </div>
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center ${isAssigned ? 'bg-[#1E3A8A]' : 'bg-white border-2 border-slate-200'}`}>
-                      {isAssigned && <Check size={12} className="text-white" />}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-            <div className="p-6 border-t border-slate-100 flex justify-end">
-              <button onClick={() => setShowViewPicker(false)} className="px-8 py-3 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all">
-                Listo
-              </button>
             </div>
           </div>
         </div>

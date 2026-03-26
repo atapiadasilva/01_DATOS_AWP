@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import {
   Star, Briefcase, Users, FileText, Calendar,
   FolderGit2, ChevronDown, ChevronRight, Activity,
-  Network, CheckSquare, Search, GitMerge, ShoppingCart, LayoutGrid
+  Network, CheckSquare, Search, GitMerge, ShoppingCart, LayoutGrid, Grid3x3
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -109,6 +109,7 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
         <NavSection id="tableros" label="Tableros" icon={Users}>
           <NavItem id="explorer"      label="Explorador Relacional" icon={Search} />
           <NavItem id="cwp-dashboard" label="Dashboard CWPs"        icon={Activity} />
+          <NavItem id="matrix"        label="Matriz CWP"            icon={Grid3x3} />
         </NavSection>
 
         <NavSection id="informes" label="Informes" icon={FileText}>
