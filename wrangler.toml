@@ -1,0 +1,8 @@
+name = "awp-data-manager"
+compatibility_date = "2024-03-19"
+pages_build_output_dir = ".next"
+
+[base_directory]
+
+[site]
+bucket = ".next"
