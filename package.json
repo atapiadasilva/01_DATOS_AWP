@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.99.2",
+    "@tanstack/react-query": "^5.95.2",
     "@tanstack/react-table": "^8.21.3",
     "clsx": "^2.1.1",
     "gantt-task-react": "^0.3.9",
@@ -19,6 +20,8 @@
     "react-dom": "^18",
     "reactflow": "^11.11.4",
     "tailwind-merge": "^3.5.0",
+    "three": "^0.183.2",
+    "web-ifc": "^0.0.77",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
@@ -26,6 +29,7 @@
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
+    "@types/three": "^0.183.1",
     "autoprefixer": "^10.0.1",
     "eslint": "^8",
     "eslint-config-next": "14.1.0",

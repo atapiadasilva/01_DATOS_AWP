@@ -80,16 +80,16 @@ export const buildWBSTree = (records: any[], edtKey: string): WBSTreeResult => {
 
     const node: WBSNode = {
       id: edt,
-      name: rowData['Nombre de tarea'] || rowData['Nombre'] || rowData['Descripción'] || 'Tarea',
+      name: rowData['Nombre de tarea'] || rowData['Nombre'] || rowData['Descripción'] || rowData['name'] || 'Tarea',
       parentId: getParentEDT(edt),
       level,
       type: 'task', // Por defecto task, se cambiará a project si tiene hijos
-      start: parseSafeDate(rowData['Comienzo Actual'] || rowData['Comienzo'] || rowData['Inicio']) || new Date(),
-      end: parseSafeDate(rowData['Fin Actual'] || rowData['Fin'] || rowData['Término']) || new Date(),
-      baselineStart: parseSafeDate(rowData['Comienzo de línea base1']) || undefined,
-      baselineEnd: parseSafeDate(rowData['Fin de línea base1']) || undefined,
-      work: parseFloat(rowData['Trabajo'] || rowData['HH'] || rowData['Esfuerzo']) || 0,
-      progress: parseFloat(rowData['% trabajo completado'] || rowData['%'] || rowData['Avance']) || 0,
+      start: parseSafeDate(rowData['Comienzo Actual'] || rowData['Comienzo'] || rowData['Inicio'] || rowData['aStart']) || new Date(),
+      end: parseSafeDate(rowData['Fin Actual'] || rowData['Fin'] || rowData['Término'] || rowData['aEnd']) || new Date(),
+      baselineStart: parseSafeDate(rowData['Comienzo de línea base1'] || rowData['bStart']) || undefined,
+      baselineEnd: parseSafeDate(rowData['Fin de línea base1'] || rowData['bEnd']) || undefined,
+      work: parseFloat(rowData['Trabajo'] || rowData['HH'] || rowData['Esfuerzo'] || rowData['hh']) || 0,
+      progress: parseFloat(rowData['% trabajo completado'] || rowData['%'] || rowData['Avance'] || rowData['pct']) || 0,
       children: [],
       metadata: rowData,
       isExpanded: true,

@@ -4,10 +4,12 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Database, Plus, X, ChevronRight, Layers, Search, ArrowRight, Check, Loader2, Download, Save, Tag, Filter } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import * as XLSX from 'xlsx';
+import { useCwpFilter } from '@/hooks/useCwpFilter';
+import type { EntityWithAttributes, RelationshipWithAttrs } from '@/types';
 
 interface RelationalExplorerProps {
-  entities: any[];
-  relationships: any[];
+  entities: EntityWithAttributes[];
+  relationships: RelationshipWithAttrs[];
   onRefresh?: () => void;
 }
 
@@ -39,15 +41,7 @@ export default function RelationalExplorer({ entities, relationships, onRefresh 
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   // ─── CWP column detection ────────────────────────────────────────────
-  const cwpColumn = useMemo(() =>
-    selectedBaseColumns.find(c => ['CWP', 'PACKAGE', 'PAQUETE'].includes(c.toUpperCase().trim())),
-    [selectedBaseColumns]
-  );
-
-  const cwpValues = useMemo(() => {
-    if (!cwpColumn) return [];
-    return Array.from(new Set(baseData.map(r => String(r[cwpColumn] || '')).filter(Boolean))).sort();
-  }, [baseData, cwpColumn]);
+  const { cwpColumn, cwpValues } = useCwpFilter(selectedBaseColumns, baseData);
 
   // ─── Carga paginada ──────────────────────────────────────────────────
   const fetchAllRecords = async (entityId: string) => {
@@ -337,8 +331,8 @@ export default function RelationalExplorer({ entities, relationships, onRefresh 
                       selectedBaseColumns.includes(col) ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-50'
                     }`}
                   >
-                    <span className={`truncate flex items-center gap-1.5 ${['CWP','PACKAGE','PAQUETE'].includes(col.toUpperCase().trim()) ? 'text-[#0C1E4F]' : ''}`}>
-                      {['CWP','PACKAGE','PAQUETE'].includes(col.toUpperCase().trim()) && <Tag size={9} />}
+                    <span className={`truncate flex items-center gap-1.5 ${col === cwpColumn ? 'text-[#0C1E4F]' : ''}`}>
+                      {col === cwpColumn && <Tag size={9} />}
                       {col}
                     </span>
                     {selectedBaseColumns.includes(col) && <Check size={10} className="shrink-0" />}

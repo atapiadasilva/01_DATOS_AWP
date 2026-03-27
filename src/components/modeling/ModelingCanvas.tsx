@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useCallback } from 'react';
-import ReactFlow, { 
-  Background, 
-  Controls, 
-  Connection, 
-  Edge, 
+import React, { useCallback, useMemo } from 'react';
+import ReactFlow, {
+  Background,
+  Controls,
+  Connection,
+  Edge,
   Node,
   NodeDragHandler,
   useNodesState,
@@ -41,13 +41,26 @@ export default function ModelingCanvas({
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
+  // Solo re-inicializar nodos cuando el conjunto de entidades cambia (añadir/borrar),
+  // NO en cada render. Así las posiciones arrastradas no se resetean.
+  const nodeIdsKey = useMemo(
+    () => initialNodes.map(n => n.id).sort().join(','),
+    [initialNodes]
+  );
   React.useEffect(() => {
     setNodes(initialNodes);
-  }, [initialNodes, setNodes]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeIdsKey]);
 
+  // Solo re-inicializar edges cuando el conjunto de relaciones cambia
+  const edgeIdsKey = useMemo(
+    () => initialEdges.map(e => e.id).sort().join(','),
+    [initialEdges]
+  );
   React.useEffect(() => {
     setEdges(initialEdges);
-  }, [initialEdges, setEdges]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edgeIdsKey]);
 
   const onConnect = useCallback(
     async (params: Connection) => {

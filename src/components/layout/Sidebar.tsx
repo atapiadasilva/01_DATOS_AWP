@@ -4,9 +4,10 @@ import React, { useState } from 'react';
 import {
   Star, Briefcase, Users, FileText, Calendar,
   FolderGit2, ChevronDown, ChevronRight, Activity,
-  Network, CheckSquare, Search, GitMerge, ShoppingCart, LayoutGrid, Grid3x3, Settings, Crown
+  Network, CheckSquare, Search, GitMerge, ShoppingCart, LayoutGrid, Grid3x3, Settings, Crown, Link2, ShieldCheck, BarChart3, Shield
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useProject } from '@/contexts/ProjectContext';
 import { ROLE_COLORS, ROLE_LABELS } from '@/lib/permissions';
 
 interface SidebarProps {
@@ -15,7 +16,8 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
-  const { role } = useAuth();
+  const { role, isPlatformAdmin } = useAuth();
+  const { projects, currentProject, switchProject } = useProject();
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     favoritos:    true,
     gestion:      true,
@@ -25,6 +27,8 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
     ingenieria:   false,
     procura:      false,
     proyectos:    false,
+    config:       true,
+    platform:     true,
   });
 
   const toggleSection = (section: string) => {
@@ -99,13 +103,16 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
       <div className="flex-1 overflow-y-auto custom-scrollbar py-3">
         <NavSection id="favoritos" label="Panel de Control" icon={Star}>
           <NavItem id="cwp-dashboard" label="Dashboard CWPs"        icon={Activity} />
-          <NavItem id="tree" label="Índice Maestro AWP" icon={GitMerge} />
+
+          <NavItem id="tree"          label="Índice Maestro AWP"    icon={GitMerge} />
         </NavSection>
 
         <NavSection id="gestion" label="Inteligencia de Datos" icon={Briefcase}>
+          <NavItem id="sot"        label="Catálogo Maestro CWP"   icon={ShieldCheck} />
           <NavItem id="upload"     label="Carga de Datos"         icon={CheckSquare} />
           <NavItem id="pwps"       label="Edición Maestra"        icon={FileText} />
           <NavItem id="modeling"   label="Modelado de Red"        icon={Network} />
+          <NavItem id="scheduler"  label="Mapeo WBS-CWP"           icon={Link2} />
           <NavItem id="views"      label="Vistas Dinámicas"       icon={LayoutGrid} />
           <NavItem id="programming" label="Programación"          icon={Activity} />
         </NavSection>
@@ -132,11 +139,35 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
           <NavItem id="req"              label="Requisitions" />
         </NavSection>
 
-        <NavSection id="proyectos" label="Proyectos" icon={FolderGit2} />
+        <NavSection id="proyectos" label="Proyectos" icon={FolderGit2}>
+          {projects.map(p => (
+            <button
+              key={p.id}
+              onClick={() => switchProject(p.id)}
+              className={`w-full flex items-center px-4 py-1.5 text-[11px] text-left transition-all rounded-r-xl mr-2 pl-9 ${
+                currentProject?.id === p.id
+                  ? 'bg-brand-orange/10 text-brand-deep font-bold border-l-[3px] border-brand-orange'
+                  : 'text-brand-slate/50 hover:bg-brand-cloud hover:text-brand-deep border-l-[3px] border-transparent'
+              }`}
+            >
+              <Briefcase size={12} className={`mr-2 shrink-0 ${currentProject?.id === p.id ? 'text-brand-orange' : 'text-brand-slate/30'}`} />
+              <span className="truncate">{p.name}</span>
+            </button>
+          ))}
+          {projects.length === 0 && (
+            <p className="px-9 py-2 text-[10px] italic text-brand-slate/30">Sin proyectos</p>
+          )}
+        </NavSection>
 
         {role === 'admin' && (
           <NavSection id="config" label="Administración" icon={Settings}>
             <NavItem id="settings" label="Configuración & Roles" icon={Crown} />
+          </NavSection>
+        )}
+
+        {isPlatformAdmin && (
+          <NavSection id="platform" label="Plataforma" icon={Shield}>
+            <NavItem id="platform-admin" label="Admin de Plataforma" icon={Shield} />
           </NavSection>
         )}
       </div>

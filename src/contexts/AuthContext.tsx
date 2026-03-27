@@ -14,6 +14,7 @@ interface AuthContextValue {
   session: Session | null;
   loading: boolean;
   role: Role;
+  isPlatformAdmin: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
@@ -28,27 +29,30 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser]       = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [role, setRole]       = useState<Role>('viewer');
+  const [user, setUser]                   = useState<User | null>(null);
+  const [session, setSession]             = useState<Session | null>(null);
+  const [loading, setLoading]             = useState(true);
+  const [role, setRole]                   = useState<Role>('viewer');
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
 
   const loadUserRole = useCallback(async (userId: string) => {
     try {
       const { data } = await supabase
         .from('user_profiles')
-        .select('role')
+        .select('role, is_platform_admin')
         .eq('id', userId)
         .single();
       setRole((data?.role as Role) || 'viewer');
+      setIsPlatformAdmin(data?.is_platform_admin ?? false);
     } catch {
       setRole('viewer');
+      setIsPlatformAdmin(false);
     }
   }, []);
 
   useEffect(() => {
     // Timeout de seguridad: si Supabase no responde en 6s, liberar loading
-    const timeout = setTimeout(() => setLoading(false), 6000);
+    const timeout = setTimeout(() => setLoading(false), 3000);
 
     // onAuthStateChange dispara INITIAL_SESSION en Supabase v2 — es la forma más confiable
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, s) => {
@@ -79,20 +83,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     password: string,
     fullName: string,
   ): Promise<{ error: string | null }> => {
-    const { data, error } = await supabase.auth.signUp({ email, password });
+    // Pass full_name in metadata so the DB trigger (handle_new_user) picks it up.
+    // The trigger uses ON CONFLICT DO NOTHING, so no duplicate profile is created.
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { full_name: fullName } },
+    });
     if (error) return { error: error.message };
-    // Create profile row
-    if (data.user) {
-      await supabase.from('user_profiles').insert({
-        id: data.user.id,
-        full_name: fullName,
-        role: 'viewer',
-      });
-    }
     return { error: null };
   };
 
   const signOut = async () => {
+    setIsPlatformAdmin(false);
     await supabase.auth.signOut();
   };
 
@@ -105,7 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, role, signIn, signUp, signOut, hasPermission, refreshRole }}>
+    <AuthContext.Provider value={{ user, session, loading, role, isPlatformAdmin, signIn, signUp, signOut, hasPermission, refreshRole }}>
       {children}
     </AuthContext.Provider>
   );

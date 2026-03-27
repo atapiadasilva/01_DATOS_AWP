@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Upload, FileText, Database, Settings, Trash2, Plus,
   Activity, X, Printer, Loader2, Save, Filter,
@@ -34,8 +35,12 @@ import CWPMatrix from '@/components/matrix/CWPMatrix';
 import GanttChart from '@/components/gantt/GanttChart';
 import LoginPage from '@/components/auth/LoginPage';
 import RolesManager from '@/components/settings/RolesManager';
+import PlatformAdmin from '@/components/admin/PlatformAdmin';
 import CWPPhotoGallery from '@/components/cwp/CWPPhotoGallery';
 import CWPReportEditor from '@/components/cwp/CWPReportEditor';
+import CWPMatcher from '@/components/mapping/CWPMatcher';
+import SourceOfTruth from '@/components/config/SourceOfTruth';
+
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
 
@@ -83,6 +88,7 @@ function getDiscColor(discipline: string) {
 const EmbeddedView = ({ viewName, filterValue, customViews, title, entities = [], isCompact = false }: {
   viewName: string; filterValue?: string; customViews: any[]; title?: string; entities?: any[]; isCompact?: boolean;
 }) => {
+  const { session } = useAuth();
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
@@ -139,7 +145,7 @@ const EmbeddedView = ({ viewName, filterValue, customViews, title, entities = []
 
   const handleDelete = async (recordId: string) => {
     if (!confirm('¿Eliminar este registro?')) return;
-    const res = await fetch('/api/views/records', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', recordId, viewId: view?.id === 'temp' ? null : view?.id }) });
+    const res = await fetch('/api/views/records', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` }, body: JSON.stringify({ action: 'delete', recordId, viewId: view?.id === 'temp' ? null : view?.id }) });
     if (res.ok) setData(prev => prev.filter(r => r.id !== recordId));
   };
 
@@ -148,7 +154,7 @@ const EmbeddedView = ({ viewName, filterValue, customViews, title, entities = []
     setIsSaving(true);
     const finalData = { ...newRow };
     if (view.filter_key && filterValue) finalData[view.filter_key] = filterValue;
-    const res = await fetch('/api/views/records', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'create', entityId: view.entity_id, viewId: view.id === 'temp' ? null : view.id, data: finalData }) });
+    const res = await fetch('/api/views/records', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` }, body: JSON.stringify({ action: 'create', entityId: view.entity_id, viewId: view.id === 'temp' ? null : view.id, data: finalData }) });
     if (res.ok) { loadViewData(); setNewRow({}); setIsAdding(false); }
     setIsSaving(false);
   };
@@ -221,18 +227,17 @@ const EmbeddedView = ({ viewName, filterValue, customViews, title, entities = []
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function Home() {
-  const { user, loading: authLoading, hasPermission } = useAuth();
+  const { user, session, loading: authLoading, hasPermission } = useAuth();
   const { currentProject } = useProject();
 
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<string>('cwp-dashboard');
-  const [entities, setEntities] = useState<any[]>([]);
-  const [relationships, setRelationships] = useState<any[]>([]);
-  const [customViews, setCustomViews] = useState<any[]>([]);
   const [selectedCWP, setSelectedCWP] = useState<any | null>(null);
   const [dashboardEntityId, setDashboardEntityId] = useState<string>('');
   const [cwpGroups, setCwpGroups] = useState<Record<string, Record<string, any>>>({});
   const [isLoadingDashboard, setIsLoadingDashboard] = useState(false);
   const [officialDisciplines, setOfficialDisciplines] = useState<string[]>([]);
+  const [cwpDisciplineMap, setCwpDisciplineMap] = useState<Record<string, string>>({}); // CWP code → disciplina
 
   // ─── CWP Dashboard: búsqueda y notas ──────────────────────────
   const [cwpSearch, setCwpSearch] = useState('');
@@ -247,13 +252,39 @@ export default function Home() {
       .then(r => r.json())
       .then((data: any[]) => setGanttTasks(data.map(d => ({
         ...d, hh: parseFloat(d.hh) || 0, pct: parseFloat(d.pct) || 0,
-      }))));
+      }))))
+      .catch(() => { /* archivo no disponible en este proyecto */ });
   }, []);
+
+  // ─── Mapeos WBS-CWP (desde Supabase) ──────────────────────────
+  const [wbsMappings, setWbsMappings] = useState<Record<string, string>>({});
+  const loadWbsMappings = useCallback(async () => {
+    if (!currentProject?.id) return;
+    const { data } = await supabase
+      .from('wbs_cwp_mappings')
+      .select('edt, cwp_name')
+      .eq('project_id', currentProject.id);
+    if (data) {
+      const m: Record<string, string> = {};
+      data.forEach(r => { m[r.edt] = r.cwp_name; });
+      setWbsMappings(m);
+    }
+  }, [currentProject?.id]);
+  useEffect(() => { loadWbsMappings(); }, [loadWbsMappings]);
+
+  // Tareas del programa con CWP resuelto (mapeo DB tiene prioridad sobre JSON)
+  const resolvedGanttTasks = useMemo(() =>
+    ganttTasks.map(t => ({
+      ...t,
+      cwp: wbsMappings[String(t.edt)] || t.cwp || '',
+    })),
+    [ganttTasks, wbsMappings]
+  );
 
   // HH por CWP: sólo hojas (sin doble conteo de padres)
   const cwpHHMap = useMemo(() => {
     const map: Record<string, { totalHH: number; doneHH: number; pct: number; tasks: any[] }> = {};
-    const withCwp = ganttTasks.filter(t => t.cwp?.trim());
+    const withCwp = resolvedGanttTasks.filter(t => t.cwp?.trim());
     const codes = Array.from(new Set(withCwp.map(t => t.cwp.trim())));
     codes.forEach(cwp => {
       const group = withCwp.filter(t => t.cwp.trim() === cwp);
@@ -263,7 +294,7 @@ export default function Home() {
       map[cwp] = { totalHH, doneHH, pct: totalHH > 0 ? doneHH / totalHH * 100 : 0, tasks: leaves };
     });
     return map;
-  }, [ganttTasks]);
+  }, [resolvedGanttTasks]);
 
   // Busca HH para un nombre de CWP (exacto o parcial)
   const getCwpHHData = (cwpName: string) => {
@@ -288,52 +319,110 @@ export default function Home() {
   const [pendingAttrs, setPendingAttrs] = useState({ parentAttrId: '', childAttrId: '' });
   const [isSavingRelationship, setIsSavingRelationship] = useState(false);
 
-  // ─── Carga inicial ────────────────────────────────────────────────────
-  const loadInitialData = async () => {
-    if (!user) return;
+  // ─── React Query: datos del proyecto ──────────────────────────────────
+  const projectId = currentProject?.id;
 
-    // Build queries — filter by project_id when a project is selected
-    let entQuery  = supabase.from('entities').select('*, attributes(*)');
-    let relQuery  = supabase.from('relationships').select('*, parent_attr:attributes!parent_attribute_id(*, entity:entities(*)), child_attr:attributes!child_attribute_id(*, entity:entities(*))');
-    let viewQuery = supabase.from('custom_views').select('*');
+  const { data: entities = [] } = useQuery({
+    queryKey: ['entities', projectId],
+    queryFn: async () => {
+      let q = supabase.from('entities').select('*, attributes(*)');
+      if (projectId) q = q.eq('project_id', projectId) as typeof q;
+      const { data, error } = await q;
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!user && !!projectId,
+  });
 
-    if (currentProject?.id) {
-      entQuery  = entQuery.eq('project_id',  currentProject.id) as typeof entQuery;
-      relQuery  = relQuery.eq('project_id',  currentProject.id) as typeof relQuery;
-      viewQuery = viewQuery.eq('project_id', currentProject.id) as typeof viewQuery;
-    }
+  const { data: relationships = [] } = useQuery({
+    queryKey: ['relationships', projectId],
+    queryFn: async () => {
+      let q = supabase.from('relationships').select(
+        '*, parent_attr:attributes!parent_attribute_id(*, entity:entities(*)), child_attr:attributes!child_attribute_id(*, entity:entities(*))'
+      );
+      if (projectId) q = q.eq('project_id', projectId) as typeof q;
+      const { data, error } = await q;
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!user && !!projectId,
+  });
 
-    const [entRes, relRes, viewRes] = await Promise.all([entQuery, relQuery, viewQuery]);
-    if (entRes.data) {
-      setEntities(entRes.data);
-      const masterAwp = entRes.data.find((e: any) => e.name.toUpperCase() === 'DATOS GENERALES AWP');
-      if (masterAwp) setDashboardEntityId(masterAwp.id);
-      else setDashboardEntityId('');
+  const { data: customViews = [] } = useQuery({
+    queryKey: ['views', projectId],
+    queryFn: async () => {
+      let q = supabase.from('custom_views').select('*');
+      if (projectId) q = q.eq('project_id', projectId) as typeof q;
+      const { data, error } = await q;
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!user && !!projectId,
+  });
 
-      // Buscar entidad CWP x Disciplina para disciplinas oficiales
-      const cwpDiscEntity = entRes.data.find((e: any) => {
-        const n = e.name.toUpperCase().replace(/\s+/g, ' ').trim();
-        return (n.includes('CWP') && (n.includes('DISCIPLINA') || n.includes('DISCIPLINE'))) ||
-               n === 'CWP X DISCIPLINA' || n === 'CWP POR DISCIPLINA' || n === 'CWP DISCIPLINA';
-      });
-      if (cwpDiscEntity) {
-        supabase.from('data_records').select('data').eq('entity_id', cwpDiscEntity.id)
-          .then(({ data: dr }) => {
-            if (dr) {
-              const discs = Array.from(new Set(
-                dr.map((r: any) => String(r.data?.DISCIPLINA || r.data?.DISCIPLINE || '').toUpperCase().trim())
-                  .filter(Boolean)
-              )).sort() as string[];
-              setOfficialDisciplines(discs);
+  // Función para invalidar las 3 queries del proyecto (reemplaza loadInitialData)
+  const invalidateProjectData = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['entities', projectId] });
+    queryClient.invalidateQueries({ queryKey: ['relationships', projectId] });
+    queryClient.invalidateQueries({ queryKey: ['views', projectId] });
+  }, [queryClient, projectId]);
+
+  // Helper de normalización para nombres de entidades
+  const normName = (s: string) => s.toUpperCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\s_\-]/g, '');
+
+  // Side effects que antes vivían dentro de loadInitialData
+  useEffect(() => {
+    if (!entities.length) return;
+
+    // ── Entidad principal AWP (para el dashboard CWP) ──
+    const masterAwp = entities.find((e: any) => {
+      const n = normName(e.name);
+      return n.includes('DATOSGENERALESAWP') || n.includes('GENERALAWP') || n === 'DATOSAWP';
+    });
+    setDashboardEntityId(masterAwp?.id || '');
+
+    // ── Entidad de disciplinas por CWP ──
+    const cwpDiscEntity = entities.find((e: any) => {
+      const n = normName(e.name);
+      return (n.includes('CWP') && (n.includes('DISCIPLINA') || n.includes('DISCIPLINE') || n.includes('ESPECIALIDAD'))) ||
+             n.includes('DISCIPLINACWP') || n.includes('CWPDISCIPLINA');
+    });
+
+    if (cwpDiscEntity) {
+      supabase.from('data_records').select('data').eq('entity_id', cwpDiscEntity.id)
+        .then(({ data: dr }) => {
+          if (!dr) return;
+
+          const discMap: Record<string, string> = {};
+          dr.forEach((r: any) => {
+            const rd = r.data || {};
+            // Buscar la columna CWP con fuzzy matching
+            const rdKeys = Object.keys(rd);
+            const cwpKey = rdKeys.find(k => {
+              const nk = normName(k);
+              return nk === 'CWP' || nk === 'PACKAGE' || nk === 'PAQUETE' ||
+                     nk.startsWith('CWP') || nk.endsWith('CWP');
+            });
+            const discKey = rdKeys.find(k => {
+              const nk = normName(k);
+              return nk === 'DISCIPLINA' || nk === 'DISCIPLINE' || nk === 'DISC' ||
+                     nk === 'ESPECIALIDAD' || nk.includes('DISCIPLIN');
+            });
+            if (cwpKey && discKey) {
+              const cwp = String(rd[cwpKey]).trim();
+              const disc = String(rd[discKey]).toUpperCase().trim();
+              if (cwp && disc) discMap[cwp] = disc;
             }
           });
-      }
-    }
-    if (relRes.data) setRelationships(relRes.data);
-    if (viewRes.data) setCustomViews(viewRes.data);
-  };
+          setCwpDisciplineMap(discMap);
 
-  useEffect(() => { loadInitialData(); }, [user, currentProject?.id]);
+          const discs = Array.from(new Set(Object.values(discMap))).sort();
+          setOfficialDisciplines(discs);
+        });
+    }
+  }, [entities]);
 
   // ─── Persistencia localStorage ────────────────────────────────────────
   useEffect(() => {
@@ -346,6 +435,28 @@ export default function Home() {
   }, [cwpNotes]);
 
   // ─── Carga de datos del dashboard CWP ────────────────────────────────
+
+  // Busca un valor en un objeto ignorando mayúsculas, tildes, espacios y guiones
+  const fuzzyGet = (obj: Record<string, any>, ...candidates: string[]): string => {
+    const norm = (s: string) => s.toUpperCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[\s_\-]/g, '');
+    const keys = Object.keys(obj);
+    for (const cand of candidates) {
+      const nc = norm(cand);
+      // Coincidencia exacta normalizada
+      const exact = keys.find(k => norm(k) === nc);
+      if (exact && obj[exact] !== undefined && String(obj[exact]).trim()) return String(obj[exact]).trim();
+    }
+    // Coincidencia parcial: la clave contiene el candidato o viceversa
+    for (const cand of candidates) {
+      const nc = norm(cand);
+      const partial = keys.find(k => { const nk = norm(k); return nk.includes(nc) || nc.includes(nk); });
+      if (partial && obj[partial] !== undefined && String(obj[partial]).trim()) return String(obj[partial]).trim();
+    }
+    return '';
+  };
+
   useEffect(() => {
     const loadDashboardData = async () => {
       if (!dashboardEntityId || activeTab !== 'cwp-dashboard') return;
@@ -356,9 +467,19 @@ export default function Home() {
           const groups: Record<string, Record<string, any>> = {};
           data.forEach(r => {
             const rd = r.data || {};
-            const cwpName = String(rd.CWP || rd.PACKAGE || 'SC-CWP');
-            const discName = String(rd.DISCIPLINA || rd.DISCIPLINE || 'GENERAL').toUpperCase();
-            const displayName = String(rd.NOMBRE_CWP || rd.NOMBRE_PAQUETE || rd.NOMBRE || rd.DESCRIPCION || rd.DESCRIPTION || '');
+            const cwpName = fuzzyGet(rd, 'CWP', 'PACKAGE', 'PAQUETE', 'CODIGO_CWP', 'CODIGO CWP', 'COD_CWP', 'COD CWP') || 'SC-CWP';
+            // Disciplina: primero desde el mapa CWP→Disciplina, luego desde la fila misma
+            const discName = (
+              cwpDisciplineMap[cwpName] ||
+              fuzzyGet(rd, 'DISCIPLINA', 'DISCIPLINE', 'DISC', 'ESPECIALIDAD') ||
+              'GENERAL'
+            ).toUpperCase();
+            const displayName = fuzzyGet(rd,
+              'NOMBRE_CWP', 'NOMBRE CWP', 'NOMBRE_PAQUETE', 'NOMBRE PAQUETE',
+              'NOMBRE_PAQUETE_DE_TRABAJO', 'NOMBRE PAQUETE DE TRABAJO',
+              'DESCRIPCION_CWP', 'DESCRIPCION CWP', 'DESCRIPCION', 'DESCRIPCIÓN',
+              'NOMBRE', 'NAME', 'DESCRIPTION', 'DESC', 'TITULO', 'TÍTULO',
+            );
             if (!groups[discName]) groups[discName] = {};
             if (!groups[discName][cwpName]) groups[discName][cwpName] = { name: cwpName, displayName: '', activities: 0, discipline: discName, hh: 0, progress: 0 };
             if (!groups[discName][cwpName].displayName && displayName && displayName !== cwpName) {
@@ -372,23 +493,44 @@ export default function Home() {
       } catch (e) { console.error(e); } finally { setIsLoadingDashboard(false); }
     };
     loadDashboardData();
-  }, [dashboardEntityId, activeTab]);
+  }, [dashboardEntityId, activeTab, cwpDisciplineMap]);
 
   // ─── Vistas globales (todas las vistas con filter_key activo) ────────
   const getCwpViews = () => customViews.filter(v => v.filter_key);
 
   // ─── Modal confirmación de relación ──────────────────────────────────
   const confirmRelationship = async () => {
-    if (!pendingAttrs.parentAttrId || !pendingAttrs.childAttrId) return;
+    if (!pendingAttrs.parentAttrId || !pendingAttrs.childAttrId) {
+      alert('Error: Debes seleccionar ambas columnas para crear la relación.');
+      return;
+    }
+    if (!projectId) {
+      alert('Error: No hay un proyecto activo seleccionado.');
+      return;
+    }
+
     setIsSavingRelationship(true);
     try {
-      await supabase.from('relationships').insert({
+      const { data, error } = await supabase.from('relationships').insert({
         parent_attribute_id: pendingAttrs.parentAttrId,
-        child_attribute_id: pendingAttrs.childAttrId
-      });
+        child_attribute_id: pendingAttrs.childAttrId,
+        project_id: projectId,
+        cardinality: '1:N', // Lógica por defecto consistente con el resto del sistema
+        join_type: 'inner'   // Lógica por defecto consistente con el resto del sistema
+      }).select();
+
+      if (error) throw error;
+
+      console.log('Relación creada exitosamente:', data);
       setPendingConnection(null);
-      loadInitialData();
-    } catch (err) { console.error(err); } finally { setIsSavingRelationship(false); }
+      invalidateProjectData();
+      alert('✓ Relación creada correctamente.');
+    } catch (err: any) {
+      console.error('Error al crear relación:', err);
+      alert('Error al crear la relación: ' + (err.message || 'Error desconocido'));
+    } finally {
+      setIsSavingRelationship(false);
+    }
   };
 
   // ─── Upload ───────────────────────────────────────────────────────────
@@ -405,28 +547,46 @@ export default function Home() {
   };
 
   const handleSaveIngestion = async () => {
+    if (!currentProject?.id) return;
     setIsUploading(true);
-    await fetch('/api/ingest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityName: newEntityName, entityId: selectedEntityForUpload, data: previewData }) });
-    setIsUploading(false);
-    loadInitialData();
+    try {
+      const res = await fetch('/api/ingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ projectId: currentProject.id, entityName: newEntityName, entityId: selectedEntityForUpload || undefined, rows: previewData, pkColumns: [], strategy: 'replace', columnTypes: {} })
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || `Error ${res.status}`);
+      setPreviewData([]);
+      setColumns([]);
+      setNewEntityName('');
+      invalidateProjectData();
+      alert(`✓ ${previewData.length} filas cargadas en "${newEntityName}"`);
+    } catch (err: any) {
+      alert(`Error al guardar: ${err.message}`);
+    } finally {
+      setIsUploading(false);
+    }
   };
 
-  // ─── Nodos y aristas para ModelingCanvas ──────────────────────────────
-  const initialNodes: RFNode[] = entities.map((ent, idx) => ({
+  // ─── Nodos y aristas para ModelingCanvas (memoizados) ─────────────────
+  const initialNodes: RFNode[] = useMemo(() => entities.map((ent, idx) => ({
     id: ent.id,
     type: 'entityNode',
-    position: ent.position_x !== undefined ? { x: ent.position_x, y: ent.position_y } : { x: 100 + (idx * 250) % 800, y: 100 + (Math.floor(idx / 3) * 200) },
+    position: ent.position_x != null ? { x: ent.position_x, y: ent.position_y } : { x: 100 + (idx * 250) % 800, y: 100 + (Math.floor(idx / 3) * 200) },
     data: { label: ent.name, attributes: ent.attributes || [] }
-  }));
+  })), [entities]);
 
-  const initialEdges: RFEdge[] = relationships.map(rel => ({
+  const initialEdges: RFEdge[] = useMemo(() => relationships.map(rel => ({
     id: rel.id,
     source: rel.parent_attr?.entity_id,
     target: rel.child_attr?.entity_id,
+    sourceHandle: rel.parent_attr?.name,
+    targetHandle: rel.child_attr?.name,
     type: 'deletableEdge',
     label: `${rel.parent_attr?.name} = ${rel.child_attr?.name}`,
     markerEnd: { type: MarkerType.ArrowClosed }
-  }));
+  })), [relationships]);
 
   const [treeData, setTreeData] = useState<any[]>([]);
   useEffect(() => {
@@ -485,6 +645,7 @@ export default function Home() {
         </header>
 
         <div className="flex-1 overflow-y-auto relative">
+
 
           {/* ─── CWP DASHBOARD ─── */}
           {activeTab === 'cwp-dashboard' && (
@@ -572,21 +733,22 @@ export default function Home() {
                             <div className="absolute top-0 right-0 p-3 opacity-0 group-hover:opacity-100 transition-opacity">
                               <ArrowRight size={12} style={{ color: dc.accent }} />
                             </div>
-                            {/* Badge disciplina */}
-                            <div className="inline-flex items-center gap-1.5 self-start px-2 py-0.5 rounded-full mb-2.5 text-[8px] font-black uppercase tracking-widest border shrink-0"
-                              style={{ backgroundColor: dc.bg, color: dc.text, borderColor: dc.border }}>
-                              <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: dc.accent }} />
-                              {cwp.discipline}
+                            {/* Fila superior: disciplina + código CWP */}
+                            <div className="flex items-center justify-between gap-2 mb-2 shrink-0">
+                              <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest border"
+                                style={{ backgroundColor: dc.bg, color: dc.text, borderColor: dc.border }}>
+                                <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: dc.accent }} />
+                                {cwp.discipline}
+                              </div>
+                              <span className="text-[9px] font-black uppercase tracking-widest shrink-0" style={{ color: dc.text, opacity: 0.8 }}>
+                                {cwp.name}
+                              </span>
                             </div>
-                            {/* Descripción CWP — texto principal grande */}
-                            <h5 className="text-[15px] font-black text-slate-800 group-hover:text-brand-deep transition-colors line-clamp-2 leading-snug pr-5">
-                              {cwp.displayName || cwp.name}
+                            {/* Descripción CWP — texto principal */}
+                            <h5 className="text-[14px] font-black text-slate-800 group-hover:text-brand-deep transition-colors line-clamp-2 leading-snug pr-2">
+                              {cwp.displayName || <span className="text-slate-300 italic font-medium text-[12px]">Sin descripción</span>}
                             </h5>
-                            {/* Código CWP — secundario pequeño */}
-                            <p className="text-[9px] font-black uppercase tracking-widest mt-1" style={{ color: dc.text, opacity: 0.7 }}>
-                              {cwp.displayName ? cwp.name : ''}
-                            </p>
-                            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">{cwp.activities} Act.</p>
+                            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-1">{cwp.activities} Act.</p>
 
                             {/* HH del programa */}
                             {displayHH > 0 && (
@@ -627,34 +789,135 @@ export default function Home() {
               })}
 
               {filteredCwps.length === 0 && !isLoadingDashboard && (
-                <div className="flex flex-col items-center justify-center h-60 text-center gap-4 opacity-30">
-                  <BarChart3 size={48} className="text-slate-300" />
-                  <p className="font-black text-slate-500 uppercase tracking-widest text-xs">
-                    {cwpSearch ? 'Sin resultados' : 'Carga datos en "DATOS GENERALES AWP" para ver los CWPs'}
-                  </p>
-                </div>
+                cwpSearch ? (
+                  <div className="flex flex-col items-center justify-center h-60 text-center gap-4 opacity-30">
+                    <BarChart3 size={48} className="text-slate-300" />
+                    <p className="font-black text-slate-500 uppercase tracking-widest text-xs">Sin resultados para &ldquo;{cwpSearch}&rdquo;</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6">
+                    <div className="bg-white rounded-3xl border border-brand-cloud shadow-xl p-10 max-w-lg w-full text-center space-y-5">
+                      <div className="w-14 h-14 rounded-2xl bg-brand-deep/5 flex items-center justify-center mx-auto">
+                        <BarChart3 size={28} className="text-brand-deep/30" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-black text-brand-deep tracking-tight">
+                          {currentProject?.name || 'Proyecto vacío'}
+                        </h3>
+                        <p className="text-brand-slate/40 text-xs font-medium mt-1">Este proyecto no tiene datos aún</p>
+                      </div>
+                      <div className="grid grid-cols-1 gap-3 text-left">
+                        <button
+                          onClick={() => setActiveTab('upload')}
+                          className="flex items-center gap-4 p-4 bg-brand-cloud rounded-2xl hover:bg-brand-electric/10 transition-all group border border-transparent hover:border-brand-electric/20"
+                        >
+                          <div className="w-9 h-9 rounded-xl bg-brand-deep flex items-center justify-center shrink-0 shadow-md shadow-brand-deep/20 group-hover:bg-brand-electric transition-all">
+                            <Upload size={15} className="text-white" />
+                          </div>
+                          <div>
+                            <p className="text-xs font-black text-brand-deep">1. Cargar Datos</p>
+                            <p className="text-[10px] text-brand-slate/50 font-medium">Importa tus archivos Excel o CSV</p>
+                          </div>
+                        </button>
+                        <button
+                          onClick={() => setActiveTab('modeling')}
+                          className="flex items-center gap-4 p-4 bg-brand-cloud rounded-2xl hover:bg-brand-electric/10 transition-all group border border-transparent hover:border-brand-electric/20"
+                        >
+                          <div className="w-9 h-9 rounded-xl bg-brand-deep flex items-center justify-center shrink-0 shadow-md shadow-brand-deep/20 group-hover:bg-brand-electric transition-all">
+                            <Network size={15} className="text-white" />
+                          </div>
+                          <div>
+                            <p className="text-xs font-black text-brand-deep">2. Conectar Bases de Datos</p>
+                            <p className="text-[10px] text-brand-slate/50 font-medium">Define relaciones entre tablas</p>
+                          </div>
+                        </button>
+                        <button
+                          onClick={() => setActiveTab('scheduler')}
+                          className="flex items-center gap-4 p-4 bg-brand-cloud rounded-2xl hover:bg-brand-electric/10 transition-all group border border-transparent hover:border-brand-electric/20"
+                        >
+                          <div className="w-9 h-9 rounded-xl bg-brand-deep flex items-center justify-center shrink-0 shadow-md shadow-brand-deep/20 group-hover:bg-brand-electric transition-all">
+                            <Link size={15} className="text-white" />
+                          </div>
+                          <div>
+                            <p className="text-xs font-black text-brand-deep">3. Mapear WBS → CWP</p>
+                            <p className="text-[10px] text-brand-slate/50 font-medium">Asocia el programa de obra al índice AWP</p>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )
               )}
             </div>
           )}
 
           {/* ─── UPLOAD ─── */}
           {activeTab === 'upload' && (
-            <div className="p-8 space-y-8">
-              <div className="p-10 bg-white rounded-[3rem] border border-slate-100 shadow-xl max-w-2xl">
-                <h3 className="text-2xl font-black italic mb-6">Ingesta de Datos</h3>
-                <input type="file" onChange={handleFileUpload} className="mb-6 text-sm" accept=".xlsx,.xls,.csv" />
+            <div className="p-8 space-y-6 max-w-2xl">
+              {/* Proyecto activo */}
+              <div className="flex items-center gap-3 px-1">
+                <div className="w-2 h-2 rounded-full bg-brand-electric animate-pulse" />
+                <span className="text-[10px] font-black text-brand-slate/40 uppercase tracking-widest">
+                  Proyecto: <span className="text-brand-deep">{currentProject?.name || '—'}</span>
+                </span>
+              </div>
+
+              <div className="bg-white rounded-[2rem] border border-brand-cloud shadow-xl p-8">
+                <h3 className="text-xl font-black text-brand-deep tracking-tight mb-1">Carga de Datos</h3>
+                <p className="text-xs text-brand-slate/40 font-medium mb-6">Importa archivos Excel (.xlsx) o CSV. Cada archivo se convierte en una tabla del proyecto.</p>
+
+                {/* Drop zone */}
+                <label className="flex flex-col items-center justify-center w-full h-40 border-2 border-dashed border-brand-cloud rounded-2xl cursor-pointer hover:border-brand-electric/40 hover:bg-brand-electric/5 transition-all group">
+                  <div className="flex flex-col items-center gap-2 text-center">
+                    <div className="w-10 h-10 rounded-xl bg-brand-deep/5 flex items-center justify-center group-hover:bg-brand-electric/10 transition-all">
+                      <Upload size={18} className="text-brand-deep/40 group-hover:text-brand-electric transition-all" />
+                    </div>
+                    <p className="text-xs font-black text-brand-slate/50">Arrastra tu archivo aquí o <span className="text-brand-electric">haz clic para seleccionar</span></p>
+                    <p className="text-[9px] font-medium text-brand-slate/30 uppercase tracking-widest">.xlsx · .xls · .csv</p>
+                  </div>
+                  <input type="file" onChange={handleFileUpload} className="hidden" accept=".xlsx,.xls,.csv" />
+                </label>
+
                 {previewData.length > 0 && (
-                  <div className="space-y-4">
-                    <p className="text-xs font-bold text-slate-500">{previewData.length} filas detectadas · {columns.length} columnas</p>
-                    <input
-                      type="text"
-                      placeholder="Nombre de la tabla..."
-                      value={newEntityName}
-                      onChange={e => setNewEntityName(e.target.value)}
-                      className="w-full p-3 bg-slate-50 border border-slate-100 rounded-xl text-sm font-bold outline-none focus:border-brand-electric"
-                    />
-                    <button onClick={handleSaveIngestion} disabled={isUploading} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-3">
-                      {isUploading ? <><Loader2 className="animate-spin" size={18} />Guardando...</> : <><Upload size={18} />Guardar Datos</>}
+                  <div className="mt-6 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-black text-brand-deep">{previewData.length} filas · {columns.length} columnas detectadas</p>
+                      <button onClick={() => { setPreviewData([]); setColumns([]); setNewEntityName(''); }} className="text-[10px] text-brand-slate/30 hover:text-red-400 font-bold transition-colors">Cancelar</button>
+                    </div>
+
+                    {/* Preview */}
+                    <div className="overflow-x-auto rounded-xl border border-brand-cloud max-h-48">
+                      <table className="w-full text-left">
+                        <thead className="bg-brand-cloud/50 sticky top-0">
+                          <tr>{columns.slice(0,6).map(c => <th key={c} className="px-3 py-2 text-[9px] font-black text-brand-slate/50 uppercase tracking-widest whitespace-nowrap">{c}</th>)}{columns.length > 6 && <th className="px-3 py-2 text-[9px] font-black text-brand-slate/30">+{columns.length-6} más</th>}</tr>
+                        </thead>
+                        <tbody className="divide-y divide-brand-cloud/50">
+                          {previewData.slice(0,5).map((row, i) => (
+                            <tr key={i} className="hover:bg-brand-cloud/20">
+                              {columns.slice(0,6).map(c => <td key={c} className="px-3 py-2 text-[10px] text-brand-slate/70 font-medium whitespace-nowrap max-w-[120px] truncate">{String(row[c] ?? '')}</td>)}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div>
+                      <label className="block text-[9px] font-black text-brand-slate/50 uppercase tracking-widest mb-1.5">Nombre de la tabla *</label>
+                      <input
+                        type="text"
+                        placeholder="Ej: DATOS GENERALES AWP, CWP x DISCIPLINA…"
+                        value={newEntityName}
+                        onChange={e => setNewEntityName(e.target.value)}
+                        className="w-full px-4 py-3 bg-brand-cloud border border-transparent rounded-xl text-sm font-bold outline-none focus:border-brand-electric transition-all text-brand-slate placeholder:text-brand-slate/30"
+                      />
+                    </div>
+
+                    <button
+                      onClick={handleSaveIngestion}
+                      disabled={isUploading || !newEntityName.trim() || !currentProject?.id}
+                      className="w-full py-3.5 bg-brand-deep text-white rounded-xl font-black text-[11px] uppercase tracking-widest flex items-center justify-center gap-2.5 hover:bg-brand-electric transition-all shadow-lg shadow-brand-deep/20 disabled:opacity-50"
+                    >
+                      {isUploading ? <><Loader2 className="animate-spin" size={15} />Guardando en {currentProject?.name}…</> : <><Save size={15} />Guardar en {currentProject?.name || 'proyecto'}</>}
                     </button>
                   </div>
                 )}
@@ -692,18 +955,27 @@ export default function Home() {
                 onSaveRelationship={async (conn) => {
                   const src = entities.find(e => e.id === conn.source);
                   const tgt = entities.find(e => e.id === conn.target);
+                  
+                  // Pre-seleccionar atributos basados en los handles conectados (nombres de columna)
+                  const srcAttr = src?.attributes?.find((a: any) => a.name === conn.sourceHandle);
+                  const tgtAttr = tgt?.attributes?.find((a: any) => a.name === conn.targetHandle);
+
                   setPendingConnection({ source: conn.source!, target: conn.target! });
                   setPendingAttrs({
-                    parentAttrId: src?.attributes?.[0]?.id || '',
-                    childAttrId: tgt?.attributes?.[0]?.id || ''
+                    parentAttrId: srcAttr?.id || src?.attributes?.[0]?.id || '',
+                    childAttrId: tgtAttr?.id || tgt?.attributes?.[0]?.id || ''
                   });
                 }}
                 onDeleteRelationship={async (id) => {
                   await supabase.from('relationships').delete().eq('id', id);
-                  loadInitialData();
+                  invalidateProjectData();
                 }}
                 onSaveNodePosition={async (nodeId, x, y) => {
                   await supabase.from('entities').update({ position_x: x, position_y: y }).eq('id', nodeId);
+                  // Actualizar cache directamente para no perder la posición en el próximo re-render
+                  queryClient.setQueryData(['entities', projectId], (old: any[]) =>
+                    old?.map(e => e.id === nodeId ? { ...e, position_x: x, position_y: y } : e) ?? old
+                  );
                 }}
               />
             </div>
@@ -712,7 +984,7 @@ export default function Home() {
           {/* ─── EXPLORADOR RELACIONAL ─── */}
           {activeTab === 'explorer' && (
             <div className="h-[calc(100vh-64px)] w-full">
-              <RelationalExplorer entities={entities} relationships={relationships} onRefresh={loadInitialData} />
+              <RelationalExplorer entities={entities} relationships={relationships} onRefresh={invalidateProjectData} />
             </div>
           )}
 
@@ -729,7 +1001,7 @@ export default function Home() {
               <CustomViewManager
                 entities={entities}
                 customViews={customViews}
-                onRefresh={loadInitialData}
+                onRefresh={invalidateProjectData}
                 EmbeddedView={EmbeddedView}
               />
             </div>
@@ -757,10 +1029,39 @@ export default function Home() {
             </div>
           )}
 
+          {/* ─── MAPEADOR WBS-CWP ─── */}
+          {activeTab === 'scheduler' && (
+            <div className="h-[calc(100vh-64px)] w-full overflow-hidden">
+              <CWPMatcher
+                programData={ganttTasks}
+                cwpGroups={cwpGroups}
+                projectId={currentProject?.id}
+                onMappingsChange={loadWbsMappings}
+              />
+            </div>
+          )}
+
+          {/* ─── FUENTE DE VERDAD (SOT) ─── */}
+          {activeTab === 'sot' && (
+            <div className="h-[calc(100vh-64px)] w-full overflow-hidden">
+              <SourceOfTruth 
+                entities={entities} 
+                projectId={currentProject?.id} 
+              />
+            </div>
+          )}
+
           {/* ─── Settings / Roles ─── */}
           {activeTab === 'settings' && (
             <div className="overflow-y-auto">
               <RolesManager />
+            </div>
+          )}
+
+          {/* ─── Platform Admin ─── */}
+          {activeTab === 'platform-admin' && (
+            <div className="overflow-y-auto">
+              <PlatformAdmin />
             </div>
           )}
 

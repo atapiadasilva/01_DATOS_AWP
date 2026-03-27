@@ -7,9 +7,11 @@ import {
   CheckSquare, Square, X, Info, Eye, EyeOff, Tag, SlidersHorizontal
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useCwpFilter } from '@/hooks/useCwpFilter';
+import type { EntityWithAttributes } from '@/types';
 
 interface DataEditorProps {
-  entities: any[];
+  entities: EntityWithAttributes[];
 }
 
 export default function DataEditor({ entities }: DataEditorProps) {
@@ -17,6 +19,9 @@ export default function DataEditor({ entities }: DataEditorProps) {
   const [data, setData] = useState<any[]>([]);
   const [columns, setColumns] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [totalCount, setTotalCount] = useState(0);
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 2000;
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
@@ -31,26 +36,33 @@ export default function DataEditor({ entities }: DataEditorProps) {
   const [showColumnFilters, setShowColumnFilters] = useState(false);
   const [cwpQuickFilter, setCwpQuickFilter] = useState('');
 
-  // ─── Carga de Datos ──────────────────────────────────────────────────────
-  const loadData = async (entityId: string) => {
+  // ─── Carga de Datos (paginada) ───────────────────────────────────────────
+  const loadData = async (entityId: string, pageIndex = 0) => {
     if (!entityId) return;
     setIsLoading(true);
-    setColumnFilters({});
-    setCwpQuickFilter('');
+    if (pageIndex === 0) {
+      setColumnFilters({});
+      setCwpQuickFilter('');
+    }
     try {
-      const { data: records, error } = await supabase
+      const from = pageIndex * PAGE_SIZE;
+      const to   = from + PAGE_SIZE - 1;
+
+      const { data: records, error, count } = await supabase
         .from('data_records')
-        .select('id, data')
+        .select('id, data', { count: 'exact' })
         .eq('entity_id', entityId)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .range(from, to);
 
       if (error) throw error;
 
       if (records) {
         const formatted = records.map(r => ({ id: r.id, ...r.data }));
-        setData(formatted);
+        setData(prev => pageIndex === 0 ? formatted : [...prev, ...formatted]);
+        if (count !== null) setTotalCount(count);
         const cols = Array.from(new Set(formatted.flatMap(r => Object.keys(r).filter(k => k !== 'id' && !k.startsWith('_batch')))));
-        setColumns(cols.sort());
+        if (pageIndex === 0) setColumns(cols.sort());
       }
     } catch (err) {
       console.error('Error loading data:', err);
@@ -61,7 +73,10 @@ export default function DataEditor({ entities }: DataEditorProps) {
 
   useEffect(() => {
     if (selectedEntityId) {
-      loadData(selectedEntityId);
+      setPage(0);
+      setData([]);
+      setTotalCount(0);
+      loadData(selectedEntityId, 0);
       setSelectedRows(new Set());
       setEditedRecords({});
       setHiddenColumns(new Set());
@@ -69,15 +84,7 @@ export default function DataEditor({ entities }: DataEditorProps) {
   }, [selectedEntityId]);
 
   // ─── Detección columna CWP ───────────────────────────────────────────────
-  const cwpColumn = useMemo(() =>
-    columns.find(c => ['CWP', 'PACKAGE', 'PAQUETE'].includes(c.toUpperCase().trim())),
-    [columns]
-  );
-
-  const cwpValues = useMemo(() => {
-    if (!cwpColumn) return [];
-    return Array.from(new Set(data.map(r => String(r[cwpColumn] || '')).filter(Boolean))).sort();
-  }, [data, cwpColumn]);
+  const { cwpColumn, cwpValues } = useCwpFilter(columns, data);
 
   // ─── Filtrado multi-columna ───────────────────────────────────────────────
   const filteredData = useMemo(() => {
@@ -194,7 +201,7 @@ export default function DataEditor({ entities }: DataEditorProps) {
         alert('Hubo errores al guardar algunos registros.');
       } else {
         setEditedRecords({});
-        loadData(selectedEntityId);
+        loadData(selectedEntityId, 0);
       }
     } catch (err) {
       console.error(err);
@@ -213,7 +220,7 @@ export default function DataEditor({ entities }: DataEditorProps) {
         .in('id', Array.from(selectedRows));
       if (error) throw error;
       setSelectedRows(new Set());
-      loadData(selectedEntityId);
+      loadData(selectedEntityId, 0);
     } catch (err) {
       console.error(err);
       alert('Error al eliminar registros.');
@@ -387,15 +394,25 @@ export default function DataEditor({ entities }: DataEditorProps) {
         {selectedEntityId && (
           <div className="px-8 py-2.5 flex items-center justify-between border-b border-slate-100 bg-white/50 text-[10px] font-black uppercase tracking-widest text-slate-400 shrink-0">
             <div className="flex items-center gap-5">
-              <span className="flex items-center gap-1.5"><Layers size={11} className="text-[#0C1E4F]" /> {data.length} Total</span>
+              <span className="flex items-center gap-1.5"><Layers size={11} className="text-[#0C1E4F]" /> {data.length}{totalCount > data.length ? ` / ${totalCount.toLocaleString()}` : ''} Total</span>
               <span className="flex items-center gap-1.5"><Filter size={11} /> {filteredData.length} Filtrados</span>
               <span className="flex items-center gap-1.5"><CheckSquare size={11} className="text-blue-500" /> {selectedRows.size} Sel.</span>
               {hiddenColumns.size > 0 && (
                 <span className="flex items-center gap-1.5 text-amber-500"><EyeOff size={11} /> {hiddenColumns.size} ocultas</span>
               )}
             </div>
-            <div className="flex items-center gap-2 italic opacity-60">
-              <Info size={11} /> Shift+Clic para rangos
+            <div className="flex items-center gap-4">
+              {totalCount > data.length && !isLoading && (
+                <button
+                  onClick={() => { const next = page + 1; setPage(next); loadData(selectedEntityId, next); }}
+                  className="px-3 py-1 bg-[#0C1E4F] text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:opacity-80 transition-all"
+                >
+                  Cargar más ({(totalCount - data.length).toLocaleString()} restantes)
+                </button>
+              )}
+              <div className="flex items-center gap-2 italic opacity-60">
+                <Info size={11} /> Shift+Clic para rangos
+              </div>
             </div>
           </div>
         )}

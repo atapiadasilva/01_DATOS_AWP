@@ -14,7 +14,7 @@ export interface IntegrityAudit {
 export const runIntegrityAudit = async (
   relationshipId: string
 ): Promise<IntegrityAudit | null> => {
-  // 1. Get relationship details
+  // 1. Get relationship metadata
   const { data: rel, error: relError } = await supabase
     .from('relationships')
     .select(`
@@ -27,52 +27,34 @@ export const runIntegrityAudit = async (
 
   if (relError || !rel) return null;
 
-  const parentId = rel.parent_attr.entity.id;
-  const childId = rel.child_attr.entity.id;
+  const parentId  = rel.parent_attr.entity.id;
+  const childId   = rel.child_attr.entity.id;
   const parentCol = rel.parent_attr.name;
-  const childCol = rel.child_attr.name;
+  const childCol  = rel.child_attr.name;
 
-  // 2. Perform Join via JavaScript in-memory (Avoiding RPC 406 error)
-  try {
-    const [parentRes, childRes] = await Promise.all([
-      supabase.from('data_records').select('data').eq('entity_id', parentId),
-      supabase.from('data_records').select('data').eq('entity_id', childId)
-    ]);
+  // 2. Single SQL join via RPC — replaces O(n) in-memory join
+  const { data, error } = await supabase.rpc('run_integrity_audit', {
+    p_parent_entity_id: parentId,
+    p_child_entity_id:  childId,
+    p_parent_col:       parentCol,
+    p_child_col:        childCol,
+  });
 
-    if (parentRes.error || childRes.error) {
-      console.error('Fetch Error:', parentRes.error || childRes.error);
-      return null;
-    }
-
-    const parents = parentRes.data || [];
-    const children = childRes.data || [];
-
-    const parentValues = new Set(parents.map(r => String(r.data?.[parentCol] || '').trim().toLowerCase()));
-    
-    let matchedCount = 0;
-    let orphanCount = 0;
-
-    children.forEach(record => {
-      const val = String(record.data?.[childCol] || '').trim().toLowerCase();
-      if (val && parentValues.has(val)) {
-        matchedCount++;
-      } else {
-        orphanCount++;
-      }
-    });
-
-    return {
-      parentEntityName: rel.parent_attr.entity.name,
-      childEntityName: rel.child_attr.entity.name,
-      parentAttribute: parentCol,
-      childAttribute: childCol,
-      totalChildRecords: children.length,
-      matchedRecords: matchedCount,
-      orphanRecords: orphanCount,
-      matchPercentage: children.length > 0 ? (matchedCount / children.length) * 100 : 100
-    };
-  } catch (err) {
-    console.error('Audit execution error:', err);
+  if (error || !data?.[0]) {
+    console.error('Audit RPC error:', error);
     return null;
   }
+
+  const { total_child, matched, orphans } = data[0];
+
+  return {
+    parentEntityName:  rel.parent_attr.entity.name,
+    childEntityName:   rel.child_attr.entity.name,
+    parentAttribute:   parentCol,
+    childAttribute:    childCol,
+    totalChildRecords: Number(total_child),
+    matchedRecords:    Number(matched),
+    orphanRecords:     Number(orphans),
+    matchPercentage:   total_child > 0 ? (Number(matched) / Number(total_child)) * 100 : 100,
+  };
 };

@@ -7,10 +7,11 @@ import {
   ChevronRight, Layers, Filter, CheckSquare, Square
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import type { EntityWithAttributes, CustomView } from '@/types';
 
 interface CustomViewManagerProps {
-  entities: any[];
-  customViews: any[];
+  entities: EntityWithAttributes[];
+  customViews: CustomView[];
   onRefresh: () => void;
   EmbeddedView: React.ComponentType<any>;
 }
@@ -51,11 +52,13 @@ export default function CustomViewManager({ entities, customViews, onRefresh, Em
     }
 
     try {
+      const entity = entities.find(e => e.id === formData.entity_id);
       const payload = {
         name: formData.name,
         entity_id: formData.entity_id,
         columns: formData.columns,
-        filter_key: formData.filter_key || null
+        filter_key: formData.filter_key || null,
+        project_id: (entity as any)?.project_id || null
       };
 
       let error;

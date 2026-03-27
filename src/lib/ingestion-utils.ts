@@ -61,7 +61,7 @@ export const getColumnPreviews = (rows: any[]): ColumnPreview[] => {
 export const processETL = (
   rows: any[],
   pkColumns: string[],
-  cleaningRules: { trim: boolean; uppercase: boolean },
+  cleaningRules: { trim: boolean; uppercase: boolean } = { trim: true, uppercase: false },
   columnTypes: Record<string, 'text' | 'number' | 'date' | 'boolean'> = {}
 ) => {
   // Heurística de negocio: Programa de Obra (EDT, Nombre del recurso/tarea, CWP)

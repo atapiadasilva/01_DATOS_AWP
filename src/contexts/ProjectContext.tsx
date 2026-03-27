@@ -10,8 +10,17 @@ export interface Project {
   id: string;
   name: string;
   description?: string;
+  status: 'active' | 'archived';
   created_at: string;
   user_id: string;
+}
+
+export interface ProjectMember {
+  user_id: string;
+  email: string;
+  full_name: string;
+  role: 'admin' | 'editor' | 'viewer';
+  joined_at: string;
 }
 
 interface ProjectContextValue {
@@ -20,7 +29,12 @@ interface ProjectContextValue {
   loading: boolean;
   switchProject: (projectId: string) => void;
   createProject: (name: string, description?: string) => Promise<Project | null>;
+  archiveProject: (projectId: string, archived: boolean) => Promise<boolean>;
   refreshProjects: () => Promise<void>;
+  getProjectMembers: (projectId: string) => Promise<ProjectMember[]>;
+  addProjectMember: (projectId: string, userId: string, role: 'admin' | 'editor' | 'viewer') => Promise<boolean>;
+  removeProjectMember: (projectId: string, userId: string) => Promise<boolean>;
+  updateProjectMemberRole: (projectId: string, userId: string, role: 'admin' | 'editor' | 'viewer') => Promise<boolean>;
 }
 
 // ─── Context ──────────────────────────────────────────────────────────────────
@@ -74,7 +88,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     if (!user) return null;
     const { data, error } = await supabase
       .from('projects')
-      .insert({ name: name.trim(), description: description?.trim() || null, user_id: user.id })
+      .insert({ name: name.trim(), description: description?.trim() || null, user_id: user.id, status: 'active' })
       .select()
       .single();
     if (!error && data) {
@@ -87,6 +101,48 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     return null;
   };
 
+  const archiveProject = async (projectId: string, archived: boolean): Promise<boolean> => {
+    const { error } = await supabase
+      .from('projects')
+      .update({ status: archived ? 'archived' : 'active' })
+      .eq('id', projectId);
+    if (!error) {
+      setProjects(prev => prev.map(p => p.id === projectId ? { ...p, status: archived ? 'archived' : 'active' } : p));
+      return true;
+    }
+    return false;
+  };
+
+  const getProjectMembers = async (projectId: string): Promise<ProjectMember[]> => {
+    const { data } = await supabase.rpc('get_project_members', { p_project_id: projectId });
+    return (data as ProjectMember[]) || [];
+  };
+
+  const addProjectMember = async (projectId: string, userId: string, role: 'admin' | 'editor' | 'viewer'): Promise<boolean> => {
+    const { error } = await supabase
+      .from('project_members')
+      .upsert({ project_id: projectId, user_id: userId, role }, { onConflict: 'project_id,user_id' });
+    return !error;
+  };
+
+  const removeProjectMember = async (projectId: string, userId: string): Promise<boolean> => {
+    const { error } = await supabase
+      .from('project_members')
+      .delete()
+      .eq('project_id', projectId)
+      .eq('user_id', userId);
+    return !error;
+  };
+
+  const updateProjectMemberRole = async (projectId: string, userId: string, role: 'admin' | 'editor' | 'viewer'): Promise<boolean> => {
+    const { error } = await supabase
+      .from('project_members')
+      .update({ role })
+      .eq('project_id', projectId)
+      .eq('user_id', userId);
+    return !error;
+  };
+
   return (
     <ProjectContext.Provider value={{
       projects,
@@ -94,7 +150,12 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       loading,
       switchProject,
       createProject,
+      archiveProject,
       refreshProjects: loadProjects,
+      getProjectMembers,
+      addProjectMember,
+      removeProjectMember,
+      updateProjectMemberRole,
     }}>
       {children}
     </ProjectContext.Provider>

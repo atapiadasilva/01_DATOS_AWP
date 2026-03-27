@@ -740,7 +740,7 @@ export default function CWPReportEditor({ cwp, hhData, customViews = [], onClose
                   <FileText size={48} className="text-slate-300" />
                   <div className="text-center">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Reporte vacío</p>
-                    <p className="text-[9px] text-slate-300 font-bold mt-1">Usa "Auto-generar" o agrega bloques desde el panel izquierdo</p>
+                    <p className="text-[9px] text-slate-300 font-bold mt-1">Usa &quot;Auto-generar&quot; o agrega bloques desde el panel izquierdo</p>
                   </div>
                 </div>
               )}

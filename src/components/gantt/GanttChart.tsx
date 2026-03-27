@@ -7,6 +7,9 @@ import {
   Maximize2, Minimize2
 } from 'lucide-react';
 
+import { supabase } from '@/lib/supabase';
+import { useProject } from '@/contexts/ProjectContext';
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface GanttTask {
   edt: string;
@@ -76,6 +79,7 @@ function MetricCard({ icon: Icon, label, value, sub, color }: {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function GanttChart() {
+  const { currentProject } = useProject();
   const [tasks, setTasks]       = useState<GanttTask[]>([]);
   const [loading, setLoading]   = useState(true);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -84,15 +88,30 @@ export default function GanttChart() {
   const [expandDepth, setExpandDepth] = useState(2);
   const [cwpFilter, setCwpFilter] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
+  const [dbMappings, setDbMappings] = useState<Record<string, string>>({});
 
   // ── Load data ──────────────────────────────────────────────────────────────
   useEffect(() => {
-    fetch('/gantt_program.json')
-      .then(r => r.json())
-      .then((raw: any[]) => {
-        const items: GanttTask[] = raw.map(d => ({
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch('/gantt_program.json');
+        const raw = await res.json();
+        
+        let mappings: Record<string, string> = {};
+        if (currentProject?.id) {
+          const { data } = await supabase
+            .from('wbs_cwp_mappings')
+            .select('edt, cwp_name')
+            .eq('project_id', currentProject.id);
+          if (data) data.forEach(m => { mappings[m.edt] = m.cwp_name; });
+          setDbMappings(mappings);
+        }
+
+        const items: GanttTask[] = raw.map((d: any) => ({
           edt:    String(d.edt ?? ''),
-          cwp:    String(d.cwp ?? ''),
+          // Prioridad: Mapeo dinámico > CWP del JSON
+          cwp:    mappings[String(d.edt)] || String(d.cwp ?? ''),
           name:   String(d.name ?? ''),
           dur:    String(d.dur ?? ''),
           bStart: String(d.bStart ?? ''),
@@ -106,29 +125,32 @@ export default function GanttChart() {
         setTasks(items);
 
         // Build parent set and initialize collapsed
-        const parentSet = new Set<string>();
-        items.forEach(t => {
-          getAncestors(t.edt).forEach(a => parentSet.add(a));
-        });
+        const pSet = new Set<string>();
+        items.forEach(t => { getAncestors(t.edt).forEach(a => pSet.add(a)); });
         const initCollapsed = new Set<string>(
-          items.filter(t => parentSet.has(t.edt) && t.level >= 2).map(t => t.edt)
+          items.filter(t => pSet.has(t.edt) && t.level >= 2).map(t => t.edt)
         );
         setCollapsed(initCollapsed);
+      } catch (e) {
+        console.error('Error loading gantt data:', e);
+      } finally {
         setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, []);
+      }
+    };
+
+    loadData();
+  }, [currentProject?.id]);
 
   // ── Unique CWP codes ───────────────────────────────────────────────────────
   const cwpCodes = useMemo(() => {
-    const codes = Array.from(new Set(tasks.map(t => t.cwp).filter(c => c?.trim())));
+    const codes = Array.from(new Set(tasks.map((t: GanttTask) => t.cwp).filter((c: string) => c?.trim())));
     return codes.sort();
   }, [tasks]);
 
   // ── Parent set ─────────────────────────────────────────────────────────────
   const parentSet = useMemo(() => {
     const s = new Set<string>();
-    tasks.forEach(t => getAncestors(t.edt).forEach(a => s.add(a)));
+    tasks.forEach((t: GanttTask) => getAncestors(t.edt).forEach((a: string) => s.add(a)));
     return s;
   }, [tasks]);
 
@@ -149,7 +171,7 @@ export default function GanttChart() {
   const expandToLevel = (maxLevel: number) => {
     setExpandDepth(maxLevel);
     setCollapsed(new Set(
-      tasks.filter(t => isParent(t.edt) && t.level >= maxLevel).map(t => t.edt)
+      tasks.filter((t: GanttTask) => isParent(t.edt) && t.level >= maxLevel).map((t: GanttTask) => t.edt)
     ));
   };
 
@@ -161,17 +183,17 @@ export default function GanttChart() {
     let allowedEdts: Set<string> | null = null;
     if (cwpFilter) {
       allowedEdts = new Set<string>();
-      tasks.filter(t => t.cwp?.trim() === cwpFilter).forEach(t => {
+      tasks.filter((t: GanttTask) => t.cwp?.trim() === cwpFilter).forEach((t: GanttTask) => {
         allowedEdts!.add(t.edt);
-        getAncestors(t.edt).forEach(a => allowedEdts!.add(a));
+        getAncestors(t.edt).forEach((a: string) => allowedEdts!.add(a));
       });
     }
 
-    return tasks.filter(t => {
+    return tasks.filter((t: GanttTask) => {
       if (allowedEdts && !allowedEdts.has(t.edt)) return false;
       if (q && !t.name.toLowerCase().includes(q) && !t.edt.includes(q)) return false;
       if (cwpFilter) return true; // ancestors always visible when CWP filter active
-      return getAncestors(t.edt).every(a => !collapsed.has(a));
+      return getAncestors(t.edt).every((a: string) => !collapsed.has(a));
     });
   }, [tasks, collapsed, search, cwpFilter]);
 
@@ -212,10 +234,10 @@ export default function GanttChart() {
 
   // ── Metrics ────────────────────────────────────────────────────────────────
   const metrics = useMemo(() => {
-    const root = tasks.find(t => t.edt === '0');
+    const root = tasks.find((t: GanttTask) => t.edt === '0');
     const globalPct = root?.pct ?? 20;
     const doneHH = TOTAL_HH * globalPct / 100;
-    const leaves = tasks.filter(t => !isParent(t.edt) && t.hh > 0);
+    const leaves = tasks.filter((t: GanttTask) => !isParent(t.edt) && t.hh > 0);
     return { globalPct, doneHH, leafCount: leaves.length };
   }, [tasks, isParent]);
 

@@ -66,9 +66,9 @@ export const DEFAULT_PERMISSIONS: Record<Role, Record<ModuleId, ModulePermission
   viewer: Object.fromEntries(
     MODULE_IDS.map(id => [
       id,
-      id === 'settings' || id === 'upload'
+      id === 'settings'
         ? { canView: false, canEdit: false, canDelete: false, canManage: false }
-        : viewerPerms,
+        : { ...viewerPerms, canView: true },
     ]),
   ) as Record<ModuleId, ModulePermission>,
 };
