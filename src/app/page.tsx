@@ -41,6 +41,7 @@ import CWPReportEditor from '@/components/cwp/CWPReportEditor';
 import CWPMatcher from '@/components/mapping/CWPMatcher';
 import SourceOfTruth from '@/components/config/SourceOfTruth';
 import APSViewer from '@/components/viewer3d/APSViewer';
+import ViewerWBSLayout from '@/components/viewer3d/ViewerWBSLayout';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
@@ -1158,6 +1159,13 @@ export default function Home() {
           {activeTab === 'viewer3d' && (
             <div className="h-full p-4">
               <APSViewer />
+            </div>
+          )}
+
+          {/* ─── Visor 3D + Programa ─── */}
+          {activeTab === 'viewer3d-wbs' && (
+            <div className="h-full p-4">
+              <ViewerWBSLayout />
             </div>
           )}
 

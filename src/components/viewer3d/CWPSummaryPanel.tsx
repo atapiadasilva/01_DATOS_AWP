@@ -18,13 +18,14 @@ interface Props {
   cwpColors:          Record<string, string>;
   onSelect:           (cwpCode: string) => void;
   onClearAll:         () => void;
+  onShowAll:          () => void;
   onToggleVisibility: (cwpCode: string) => void;
   onColorChange:      (cwpCode: string, color: string) => void;
 }
 
 export default function CWPSummaryPanel({
   items, activeCwp, hiddenCwps, cwpColors,
-  onSelect, onClearAll, onToggleVisibility, onColorChange,
+  onSelect, onClearAll, onShowAll, onToggleVisibility, onColorChange,
 }: Props) {
   const [query, setQuery] = useState('');
   const colorInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -179,14 +180,26 @@ export default function CWPSummaryPanel({
       </div>
 
       {/* Footer */}
-      {activeCwp && (
-        <div className="px-2 py-2 border-t border-slate-100 shrink-0">
-          <button
-            onClick={() => onSelect(activeCwp)}
-            className="w-full text-[10px] text-blue-600 font-semibold hover:text-blue-800 transition-colors"
-          >
-            Mostrando: {activeCwp} — clic para deseleccionar
-          </button>
+      {(activeCwp || hiddenCwps.length > 0) && (
+        <div className="px-2 py-2 border-t border-slate-100 shrink-0 space-y-1">
+          {activeCwp && (
+            <button
+              onClick={() => onSelect(activeCwp)}
+              className="w-full text-[10px] text-blue-600 font-semibold hover:text-blue-800 transition-colors"
+            >
+              Mostrando: {activeCwp} — clic para deseleccionar
+            </button>
+          )}
+          {hiddenCwps.length > 0 && (
+            <button
+              onClick={onShowAll}
+              className="w-full flex items-center justify-center gap-1.5 text-[10px] font-semibold
+                text-slate-500 hover:text-slate-800 transition-colors py-0.5"
+            >
+              <Eye className="w-3 h-3" />
+              Mostrar todos ({hiddenCwps.length} oculto{hiddenCwps.length !== 1 ? 's' : ''})
+            </button>
+          )}
         </div>
       )}
     </div>

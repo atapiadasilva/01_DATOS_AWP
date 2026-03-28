@@ -45,7 +45,12 @@ function buildSummary(
     }));
 }
 
-export default function APSViewer() {
+interface APSViewerProps {
+  onSelectionChange?:    (externalIds: string[]) => void;
+  onModelUrnReady?:      (urn: string) => void;
+  highlightExternalIds?: string[];
+}
+export default function APSViewer({ onSelectionChange, onModelUrnReady, highlightExternalIds }: APSViewerProps = {}) {
   const { currentProject } = useProject();
   const containerRef       = useRef<HTMLDivElement>(null);
   const viewerRef          = useRef<any>(null);
@@ -53,6 +58,9 @@ export default function APSViewer() {
   const extIdToDbIdRef     = useRef<Record<string, number>>({});
   const elemInfoRef        = useRef<Record<string, { name: string; category: string }>>({});
   const assignmentsRef     = useRef<AssignmentMap>({});
+  // mirrors of state for use inside viewer event callbacks (avoid stale closures)
+  const hiddenCwpsRef      = useRef<string[]>([]);
+  const cwpColorsRef       = useRef<Record<string, string>>({});
 
   const [sdkReady,    setSdkReady]    = useState(false);
   const [viewerReady, setViewerReady] = useState(false);
@@ -68,6 +76,21 @@ export default function APSViewer() {
   const [cwpColors,   setCwpColors]   = useState<Record<string, string>>({});
   // set of cwp_codes currently hidden in the viewer
   const [hiddenCwps,  setHiddenCwps]  = useState<string[]>([]);
+
+  // keep refs in sync with state so event callbacks always see fresh values
+  useEffect(() => { hiddenCwpsRef.current = hiddenCwps; }, [hiddenCwps]);
+  useEffect(() => { cwpColorsRef.current  = cwpColors;  }, [cwpColors]);
+
+  useEffect(() => {
+    if (!highlightExternalIds?.length || !viewerRef.current) return;
+    const dbIds = highlightExternalIds
+      .map(id => extIdToDbIdRef.current[id])
+      .filter((id): id is number => id != null);
+    if (dbIds.length) {
+      viewerRef.current.select(dbIds);
+      viewerRef.current.fitToView(dbIds);
+    }
+  }, [highlightExternalIds]);
 
   // helper: effective color for a CWP
   const getCwpColor = useCallback(
@@ -153,6 +176,7 @@ export default function APSViewer() {
               }))
             );
             setSelection(elements);
+            onSelectionChange?.(elements.map(e => e.externalId));
           }
         );
 
@@ -160,6 +184,27 @@ export default function APSViewer() {
           window.Autodesk.Viewing.GEOMETRY_LOADED_EVENT,
           () => { applyColorsFromDB(viewer); }
         );
+
+        // ── Intercept showAll (toolbar button + any caller) ──────────────
+        // The toolbar "Show All" button calls viewer.showAll() directly.
+        // We override it so React state always stays in sync.
+        const _origShowAll = viewer.showAll.bind(viewer);
+        viewer.showAll = () => {
+          _origShowAll();
+          const hidden = hiddenCwpsRef.current;
+          if (!hidden.length) return;
+          // Re-apply theming colors for every CWP that was hidden
+          hidden.forEach(cwpCode => {
+            const color = cwpColorsRef.current[cwpCode] ?? cwpHexColor(cwpCode);
+            Object.entries(assignmentsRef.current)
+              .filter(([, code]) => code === cwpCode)
+              .forEach(([extId]) => {
+                const dbId = extIdToDbIdRef.current[extId];
+                if (dbId != null) viewer.setThemingColor(dbId, hexToVec4(color), viewer.model, true);
+              });
+          });
+          setHiddenCwps([]);
+        };
 
         setViewerReady(true);
         loadDefaultModel(viewer);
@@ -184,6 +229,7 @@ export default function APSViewer() {
       if (!r.ok) { setError((await r.json()).error ?? 'Modelo no encontrado'); setStatus(''); return; }
       const { urn, name } = await r.json();
       modelUrnRef.current = urn;
+      onModelUrnReady?.(urn);
       setModelName(name);
       setStatus(`Cargando ${name}…`);
       window.Autodesk.Viewing.Document.load(
@@ -328,6 +374,24 @@ export default function APSViewer() {
     });
   }, [getCwpColor]);
 
+  // ── Show all (sync panel + viewer) ───────────────────────────────────────
+  const handleShowAll = useCallback(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    viewer.showAll();
+    // Re-apply theming colors for all hidden CWPs
+    hiddenCwps.forEach(cwpCode => {
+      const color = getCwpColor(cwpCode);
+      Object.entries(assignmentsRef.current)
+        .filter(([, code]) => code === cwpCode)
+        .forEach(([extId]) => {
+          const dbId = extIdToDbIdRef.current[extId];
+          if (dbId != null) viewer.setThemingColor(dbId, hexToVec4(color), viewer.model, true);
+        });
+    });
+    setHiddenCwps([]);
+  }, [hiddenCwps, getCwpColor]);
+
   // ── Change color ──────────────────────────────────────────────────────────
   const handleColorChange = useCallback((cwpCode: string, hexColor: string) => {
     setCwpColors(prev => ({ ...prev, [cwpCode]: hexColor }));
@@ -358,6 +422,7 @@ export default function APSViewer() {
         onSelect={handleCwpSelect}
         onToggleVisibility={handleToggleVisibility}
         onColorChange={handleColorChange}
+        onShowAll={handleShowAll}
         onClearAll={() => {
           viewerRef.current?.clearSelection();
           setActiveCwp(null);
