@@ -81,24 +81,60 @@ export async function PUT(req: NextRequest) {
   return NextResponse.json(res.data);
 }
 
-// Batch update sort_order
+// Patch updates (single or batch)
 export async function PATCH(req: NextRequest) {
-  const updates = await req.json();
-  if (!Array.isArray(updates)) return NextResponse.json({ error: 'Expected array' }, { status: 400 });
+  const body = await req.json();
   
-  const promises = updates.map((u: any) => 
-    supabase.from('weekly_plan_activities').update({ sort_order: u.sort_order }).eq('id', u.id)
-  );
-  
-  const results = await Promise.all(promises);
-  const errs = results.filter(r => r.error);
-  
-  if (errs.length > 0) {
-    // Si la columna no existe, ignoramos el fallo de reordenamiento pacíficamente.
-    if (errs[0].error?.code === '42703') return NextResponse.json({ success: true, warning: 'sort_order not added' });
-    return NextResponse.json({ error: errs[0].error?.message }, { status: 500 });
+  // 1. Array Case (Batch Sort Order)
+  if (Array.isArray(body)) {
+    const promises = body.map((u: any) => 
+      supabase.from('weekly_plan_activities').update({ sort_order: u.sort_order }).eq('id', u.id)
+    );
+    const results = await Promise.all(promises);
+    const errs = results.filter(r => r.error);
+    if (errs.length > 0 && errs[0].error?.code !== '42703') {
+      return NextResponse.json({ error: errs[0].error?.message }, { status: 500 });
+    }
+    return NextResponse.json({ success: true });
   }
-  return NextResponse.json({ success: true });
+
+  // 2. Object Case (Single field update)
+  if (!body.id) return NextResponse.json({ error: 'Missing ID' }, { status: 400 });
+  const { id, ...rest } = body;
+  
+  // Map camelCase to snake_case if necessary
+  const payload: any = {};
+  if ('title' in rest)      payload.title      = rest.title;
+  if ('discipline' in rest) payload.discipline = rest.discipline;
+  if ('startDate' in rest)  payload.start_date = rest.startDate;
+  if ('endDate' in rest)    payload.end_date   = rest.endDate;
+  if ('start_date' in rest) payload.start_date = rest.start_date;
+  if ('end_date' in rest)   payload.end_date   = rest.end_date;
+  if ('progress' in rest)   payload.progress   = rest.progress;
+  if ('color' in rest)      payload.color      = rest.color;
+  if ('notes' in rest)      payload.notes      = rest.notes;
+  if ('sort_order' in rest) payload.sort_order = rest.sort_order;
+
+  payload.updated_at = new Date().toISOString();
+
+  const { data, error } = await supabase
+    .from('weekly_plan_activities')
+    .update(payload)
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) {
+    if (error.code === '42703' && 'sort_order' in payload) {
+       delete payload.sort_order;
+       const retry = await supabase.from('weekly_plan_activities').update(payload).eq('id', id).select().single();
+       if (retry.error) return NextResponse.json({ error: retry.error.message }, { status: 500 });
+       return NextResponse.json(retry.data);
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json(data);
 }
 
 export async function DELETE(req: NextRequest) {

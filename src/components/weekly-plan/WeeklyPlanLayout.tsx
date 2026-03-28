@@ -4,11 +4,11 @@ import React, {
   useCallback, useEffect, useMemo, useRef, useState,
 } from 'react';
 import {
-  Plus, Trash2, Link2, Link2Off, ChevronLeft, ChevronRight,
+  Plus, Trash2, Link2, Link2Off, ChevronLeft, ChevronRight, ChevronDown,
   GripHorizontal, CalendarDays, Loader2, Check, X,
-  Play, Pause, SkipBack, Ghost, Calendar, Palette,
+  Play, Pause, SkipBack, Ghost, Calendar, Palette, Maximize2,
 } from 'lucide-react';
-import APSViewer4D from '@/components/viewer3d/APSViewer4D';
+import APSViewer4D, { type APSViewer4DHandle } from '@/components/viewer3d/APSViewer4D';
 import { useProject } from '@/contexts/ProjectContext';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -136,18 +136,27 @@ export default function WeeklyPlanLayout() {
 
   // Selection / edit
   const [selectedId,  setSelectedId]  = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set()); // multi-select
+  const [multiSelect, setMultiSelect] = useState(false);
   const [editDraft,   setEditDraft]   = useState<Partial<Activity> | null>(null);
   const [isNew,       setIsNew]       = useState(false);
-  const [discFilter,  setDiscFilter]  = useState<string>('');
+  const [discFilter,  setDiscFilter]  = useState<string>(''); // filtro disciplina: lista + viewer
   const [draggedId,   setDraggedId]   = useState<string | null>(null);
-  const [showColors,  setShowColors]  = useState(true);
-  const [dirtyIds,    setDirtyIds]    = useState<Set<string>>(new Set());
+  const [showColors,     setShowColors]     = useState(true);
+  const [dirtyIds,       setDirtyIds]       = useState<Set<string>>(new Set());
+  const [collapsedDiscs, setCollapsedDiscs] = useState<Set<string>>(new Set());
 
   // Viewer
   const [modelUrn,  setModelUrn]  = useState('');
   const [viewerSel, setViewerSel] = useState<string[]>([]); // current APS selection
   const [basket,    setBasket]    = useState<string[]>([]); // accumulated for linking
+  const [chipSel,      setChipSel]      = useState<string | null>(null); // chip clicked → select in viewer
+  const [showChips,    setShowChips]    = useState(false);              // toggle chip panel
+  const [pendingRemove, setPendingRemove] = useState<Set<string>>(new Set()); // marked for removal
+  const basketRef     = useRef<string[]>([]);               // always-fresh basket for linkElements
   const activitiesRef = useRef<Activity[]>([]);             // always-fresh ref for drag save
+  const linkedSetRef  = useRef<Set<string>>(new Set());     // always-fresh for handleViewerSelection
+  const viewerApiRef  = useRef<APSViewer4DHandle>(null);    // imperative viewer API
 
   // 3-week window
   const [weekStart, setWeekStart] = useState<Date>(() => prevMonday(new Date()));
@@ -212,6 +221,9 @@ export default function WeeklyPlanLayout() {
     setViewerSel(extIds);
     if (extIds.length > 0) {
       setBasket(prev => Array.from(new Set([...prev, ...extIds])));
+      // Bidireccional: si el elemento clickeado está vinculado a la actividad seleccionada → resalta su chip
+      const linked = extIds.find(id => linkedSetRef.current.has(id));
+      if (linked) { setChipSel(linked); setShowChips(true); }
     }
   }, []);
 
@@ -224,13 +236,15 @@ export default function WeeklyPlanLayout() {
       const body   = isNew
         ? { projectId: currentProject.id, title: act.title, discipline: act.discipline, startDate: act.start_date, endDate: act.end_date, progress: act.progress, wbsEdt: act.wbs_edt, wbsName: act.wbs_name, notes: act.notes, color: act.color }
         : { id: act.id, title: act.title, discipline: act.discipline, startDate: act.start_date, endDate: act.end_date, progress: act.progress, wbsEdt: act.wbs_edt, wbsName: act.wbs_name, notes: act.notes, color: act.color };
-      const res  = await fetch('/api/weekly-plan/activities', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      const raw  = await res.json();
-      // Normalize ISO dates → YYYY-MM-DD (DB returns full timestamp with timezone)
+      const res = await fetch('/api/weekly-plan/activities', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const raw = await res.json();
+      if (!res.ok) { console.error('[saveActivity] API error:', raw); return; }
+      // Normalize ISO dates → YYYY-MM-DD
       const data = { ...raw, start_date: raw.start_date?.split('T')[0] ?? raw.start_date, end_date: raw.end_date?.split('T')[0] ?? raw.end_date };
       if (isNew) {
         setActivities(p => [...p, data]);
         setSelectedId(data.id);
+        setSelectedIds(new Set([data.id]));
         setIsNew(false);
       } else {
         setActivities(p => p.map(a => a.id === data.id ? data : a));
@@ -250,23 +264,40 @@ export default function WeeklyPlanLayout() {
   }, [selectedId]);
 
   // ── Link elements (basket → activity) ─────────────────────────────────────
+  // Uses basketRef.current so it ALWAYS reads the full up-to-date basket,
+  // even if called before React's next render cycle (avoids stale closure).
   const linkElements = useCallback(async () => {
-    if (!selectedId || !basket.length || !currentProject?.id || !modelUrn) return;
+    const currentBasket = basketRef.current;
+    if (!selectedId || !currentBasket.length || !currentProject?.id || !modelUrn) return;
     setSaving(true);
     try {
-      await fetch('/api/weekly-plan/links', {
+      const res = await fetch('/api/weekly-plan/links', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ activityId: selectedId, projectId: currentProject.id, modelUrn, externalIds: basket }),
+        body:    JSON.stringify({
+          activityId: selectedId,
+          projectId:  currentProject.id,
+          modelUrn,
+          externalIds: currentBasket,
+        }),
       });
-      setLinks(p => ({ ...p, [selectedId]: Array.from(new Set([...(p[selectedId] ?? []), ...basket])) }));
-      setBasket([]);   // clear basket after successful link
+      const result = await res.json();
+      if (!res.ok) { console.error('[linkElements] API error:', result); return; }
+      // Merge into local links state
+      setLinks(p => ({
+        ...p,
+        [selectedId]: Array.from(new Set([...(p[selectedId] ?? []), ...currentBasket])),
+      }));
+      setBasket([]);    // clear basket after successful link
       setViewerSel([]); // deselect in viewer
+    } catch (e) {
+      console.error('[linkElements] fetch error:', e);
     } finally {
       setSaving(false);
     }
-  }, [selectedId, basket, currentProject?.id, modelUrn]);
+  }, [selectedId, currentProject?.id, modelUrn]); // basket removed from deps — uses ref instead
 
+  // Desvincular TODOS los elementos de la actividad seleccionada
   const unlinkElements = useCallback(async () => {
     if (!selectedId) return;
     setSaving(true);
@@ -284,7 +315,8 @@ export default function WeeklyPlanLayout() {
 
   // ── Inline Edit & Reorder ──────────────────────────────────────────────────
   const updateActivityField = useCallback(async (act: Activity, field: keyof Activity, val: any) => {
-    if (act[field] === val) return;
+    // No early-return: the onChange already updated local state before onBlur fires,
+    // so act[field] === val would always be true for text inputs and skip the save.
     const nextAct = { ...act, [field]: val };
     setActivities(p => p.map(a => a.id === act.id ? nextAct : a));
     try {
@@ -412,34 +444,137 @@ export default function WeeklyPlanLayout() {
   const today      = new Date();
   const todayOff   = daysBetween(weekStart, today);
 
-  // Keep activitiesRef always in sync (needed for drag save without stale closure)
+  // Keep refs always in sync (avoids stale closures in async callbacks)
   useEffect(() => { activitiesRef.current = activities; }, [activities]);
+  useEffect(() => { basketRef.current = basket; }, [basket]);
 
   const filtered = useMemo(() => activities.filter(a => !discFilter || a.discipline === discFilter), [activities, discFilter]);
   const selected = activities.find(a => a.id === selectedId) ?? null;
+
+  // ── Basket / link intersection — used by toolbar buttons ─────────────────
+  const currentLinks = useMemo(
+    () => (selectedId ? (links[selectedId] ?? []) : []),
+    [selectedId, links],
+  );
+  const linkedSet    = useMemo(() => new Set(currentLinks), [currentLinks]);
+  // Sync linkedSetRef for use in handleViewerSelection (avoids stale closure)
+  useEffect(() => { linkedSetRef.current = linkedSet; }, [linkedSet]);
+  // Reset chip UI when selected activity changes
+  useEffect(() => { setChipSel(null); setShowChips(false); setPendingRemove(new Set()); }, [selectedId]);
+  // basket items that are ALREADY linked → Desvincular
+  const basketLinked = useMemo(() => basket.filter(id => linkedSet.has(id)), [basket, linkedSet]);
+  // basket items NOT yet linked → Vincular
+  const basketNew    = useMemo(() => basket.filter(id => !linkedSet.has(id)), [basket, linkedSet]);
+
+  // Marcar / desmarcar un chip para eliminación (no borra hasta confirmar)
+  const togglePending = useCallback((extId: string) => {
+    setPendingRemove(p => {
+      const n = new Set(p);
+      n.has(extId) ? n.delete(extId) : n.add(extId);
+      return n;
+    });
+  }, []);
+
+  // Confirmar eliminación de todos los chips marcados
+  const savePendingRemovals = useCallback(async () => {
+    if (!selectedId || pendingRemove.size === 0) return;
+    const toRemove = Array.from(pendingRemove);
+    setSaving(true);
+    try {
+      const res = await fetch('/api/weekly-plan/links', {
+        method:  'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ activityId: selectedId, externalIds: toRemove }),
+      });
+      if (!res.ok) { console.error('[savePendingRemovals]', await res.json()); return; }
+      setLinks(p => ({
+        ...p,
+        [selectedId]: (p[selectedId] ?? []).filter(id => !toRemove.includes(id)),
+      }));
+      setPendingRemove(new Set());
+      setChipSel(null);
+    } finally {
+      setSaving(false);
+    }
+  }, [selectedId, pendingRemove]);
+
+  // Desvincular SOLO los elementos del basket que ya están vinculados a la actividad.
+  const unlinkSpecific = useCallback(async () => {
+    if (!selectedId) return;
+    const toRemove = basketRef.current.filter(id => linkedSet.has(id));
+    if (!toRemove.length) return;
+    setSaving(true);
+    try {
+      const res = await fetch('/api/weekly-plan/links', {
+        method:  'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ activityId: selectedId, externalIds: toRemove }),
+      });
+      if (!res.ok) { console.error('[unlinkSpecific]', await res.json()); return; }
+      setLinks(p => ({
+        ...p,
+        [selectedId]: (p[selectedId] ?? []).filter(id => !toRemove.includes(id)),
+      }));
+      setBasket([]);
+      setViewerSel([]);
+    } finally {
+      setSaving(false);
+    }
+  }, [selectedId, linkedSet]);
+
+  // ── Group by discipline ────────────────────────────────────────────────────
+  const grouped = useMemo(() => {
+    const map = new Map<string, Activity[]>();
+    filtered.forEach(act => {
+      const d = act.discipline || 'General';
+      if (!map.has(d)) map.set(d, []);
+      map.get(d)!.push(act);
+    });
+    return Array.from(map.entries()).map(([discipline, acts]) => ({ discipline, acts }));
+  }, [filtered]);
 
   // ── 4D Colors Evaluation ───────────────────────────────────────────────────
   // We consider "Simulation Mode" active if playing, or if the user has scrubbed to a different date than today.
   const isSimMode = playing || Math.abs(currentDate.getTime() - today.getTime()) > 86400000;
 
+  // ExternalIds de actividades de la disciplina filtrada (para aislar en viewer)
+  const discFilteredExtIds = useMemo(() => {
+    if (!discFilter) return null; // null = sin filtro activo
+    const ids: string[] = [];
+    activities.forEach(act => {
+      if (act.discipline === discFilter) ids.push(...(links[act.id] ?? []));
+    });
+    return ids;
+  }, [discFilter, activities, links]);
+
   const { elementColors, doneIds } = useMemo(() => {
-    // 1. Planning Mode (Discipline Colors)
+    // Actividades visibles: si hay filtro solo las de esa disciplina, si no todas
+    const visibleActs = discFilter ? activities.filter(a => a.discipline === discFilter) : activities;
+
+    // 1. Planning Mode
     if (!isSimMode) {
       const colors: ElementColor[] = [];
       if (showColors) {
-        activities.forEach(act => {
-          const actLinks = links[act.id] ?? [];
-          if (actLinks.length > 0) {
-            const isSelected = act.id === selectedId;
-            const hex = act.color || discColor(act.discipline);
-            const alpha = selectedId ? (isSelected ? 0.95 : 0.4) : 0.85;
-            actLinks.forEach(extId => colors.push({ externalId: extId, hex, alpha }));
-          }
-        });
+        const inBasket = new Set(basket);
+        if (selectedIds.size > 0 && basket.length === 0) {
+          visibleActs.forEach(act => {
+            if (!selectedIds.has(act.id)) return;
+            (links[act.id] ?? []).forEach(extId =>
+              colors.push({ externalId: extId, hex: '#22c55e', alpha: 0.95 })
+            );
+          });
+        } else {
+          visibleActs.forEach(act => {
+            const actLinks = links[act.id] ?? [];
+            const isSel = selectedIds.has(act.id);
+            actLinks.forEach(extId => {
+              if (!inBasket.has(extId))
+                colors.push({ externalId: extId, hex: '#22c55e', alpha: isSel ? 0.92 : 0.6 });
+            });
+          });
+        }
       }
-      // Basket elements override with amber — visible regardless of showColors
       basket.forEach(extId => {
-        // Remove any existing color for this element and replace with basket color
         const idx = colors.findIndex(c => c.externalId === extId);
         const entry: ElementColor = { externalId: extId, hex: '#f59e0b', alpha: 0.98 };
         if (idx >= 0) colors[idx] = entry;
@@ -448,13 +583,12 @@ export default function WeeklyPlanLayout() {
       return { elementColors: colors, doneIds: [] };
     }
 
-    // 2. 4D Simulation Mode (Week Colors based on playback date)
+    // 2. 4D Simulation Mode
     const colors: ElementColor[] = [];
     const done: string[] = [];
-    activities.forEach(act => {
+    visibleActs.forEach(act => {
       const st = getStatus(act, currentDate);
       if (st === 'not-started') return;
-      
       const actLinks = links[act.id] ?? [];
       if (st === 'done') {
         done.push(...actLinks);
@@ -464,7 +598,7 @@ export default function WeeklyPlanLayout() {
       }
     });
     return { elementColors: colors, doneIds: done };
-  }, [activities, links, currentDate, selectedId, isSimMode, weekStart, showColors]);
+  }, [activities, links, currentDate, selectedId, selectedIds, isSimMode, weekStart, showColors, basket, discFilter]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -473,11 +607,15 @@ export default function WeeklyPlanLayout() {
       {/* ── 3D Viewer ─────────────────────────────────────────────────────── */}
       <div className="shrink-0 overflow-hidden" style={{ height: panelMin ? 'calc(100% - 36px)' : `${viewerPct}%` }}>
         <APSViewer4D
+          ref={viewerApiRef}
           onModelUrnReady={setModelUrn}
           onSelectionChange={handleViewerSelection}
           elementColors={elementColors}
           doneIds={doneIds}
-          globalGrey={globalGrey}
+          globalGrey={isSimMode ? globalGrey : (basket.length === 0 && globalGrey)}
+          selection={chipSel ? [chipSel] : undefined}
+          disciplineFilter={discFilter}
+          isolateIds={discFilteredExtIds ?? undefined}
         />
       </div>
 
@@ -508,11 +646,37 @@ export default function WeeklyPlanLayout() {
 
               <div className="w-px h-4 bg-slate-600 mx-1" />
 
+              {/* Multi-select toggle */}
+              <label className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] cursor-pointer transition-colors border select-none
+                ${multiSelect ? 'bg-violet-500/20 text-violet-300 border-violet-500/50' : 'bg-slate-700 text-slate-400 border-transparent hover:text-white'}`}>
+                <input type="checkbox" checked={multiSelect}
+                  onChange={e => {
+                    setMultiSelect(e.target.checked);
+                    if (!e.target.checked) setSelectedIds(selectedId ? new Set([selectedId]) : new Set());
+                  }}
+                  className="accent-violet-400 w-3 h-3" />
+                Multi
+                {multiSelect && selectedIds.size > 1 && (
+                  <span className="font-bold text-violet-200">({selectedIds.size})</span>
+                )}
+              </label>
+
               {/* 4D Controls */}
               <button onClick={() => setGlobalGrey(!globalGrey)} title="Toggle Ghost Mode"
                 className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] transition-colors border ${globalGrey ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/50' : 'bg-slate-700 text-slate-400 border-transparent hover:text-white'}`}>
                 <Ghost className="w-3.5 h-3.5" /> Ghost
               </button>
+
+              <select
+                value={discFilter}
+                onChange={e => setDiscFilter(e.target.value)}
+                className={`text-[10px] font-bold px-1.5 py-0.5 rounded border transition-colors outline-none cursor-pointer
+                  ${discFilter ? 'bg-blue-500 text-white border-blue-400' : 'bg-slate-700 text-slate-400 border-transparent hover:text-white'}`}
+                title="Filtrar lista + modelo 3D por disciplina"
+              >
+                <option value="">Todas las disciplinas</option>
+                {DISCIPLINES.filter(Boolean).map(d => <option key={d} value={d} className="bg-white text-black">{d}</option>)}
+              </select>
               
               <button onClick={() => setShowColors(!showColors)} title="Colorear elementos asignados por disciplina"
                 className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] transition-colors border ${showColors ? 'bg-amber-500/20 text-amber-500 border-amber-500/50' : 'bg-slate-700 text-slate-400 border-transparent hover:text-white'}`}>
@@ -547,32 +711,61 @@ export default function WeeklyPlanLayout() {
 
               <div className="flex-1" />
 
-              {/* Selection basket indicator + link/unlink */}
+              {/* ── Basket counter + clear ── */}
               {basket.length > 0 && (
                 <div className="flex items-center gap-1">
                   <span className="text-[10px] text-amber-300 font-semibold">
-                    🧺 {basket.length} elem.
+                    🧺 {basket.length}
+                    {selectedId && basketLinked.length > 0 && basketNew.length > 0 && (
+                      <span className="text-slate-400 font-normal ml-0.5">
+                        ({basketNew.length}↑ {basketLinked.length}↓)
+                      </span>
+                    )}
                   </span>
-                  <button onClick={() => { setBasket([]); setViewerSel([]); }}
-                    title="Limpiar cesta" className="text-slate-500 hover:text-red-400 transition-colors">
-                    <X className="w-3 h-3" />
+                  <button
+                    onClick={() => viewerApiRef.current?.zoomToElements(basket)}
+                    title="Zoom a los elementos seleccionados"
+                    className="flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-500/50 bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 transition-colors">
+                    <Maximize2 className="w-3 h-3" /> Zoom ({basket.length})
+                  </button>
+                  <button
+                    onClick={() => { setBasket([]); setViewerSel([]); setChipSel(null); }}
+                    title="Limpiar basket"
+                    className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded border border-slate-600 text-slate-400 hover:border-red-400 hover:text-red-400 transition-colors">
+                    <X className="w-3 h-3" /> Limpiar
                   </button>
                 </div>
               )}
-              {selectedId && basket.length > 0 && (
+
+              {/* Sin actividad → aviso */}
+              {!selectedId && basket.length > 0 && (
+                <span className="text-[10px] text-slate-400 italic">← selecciona actividad</span>
+              )}
+
+              {/* Vincular elementos nuevos */}
+              {selectedId && basketNew.length > 0 && (
                 <button onClick={linkElements} disabled={saving}
                   className="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded bg-blue-500 hover:bg-blue-400 disabled:opacity-40 transition-colors">
                   {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Link2 className="w-3 h-3" />}
-                  Vincular {basket.length}
+                  Vincular {basketNew.length}
                 </button>
               )}
-              {!selectedId && basket.length > 0 && (
-                <span className="text-[10px] text-slate-400 italic">← selecciona una actividad</span>
+
+              {/* Desvincular elementos seleccionados que ya están vinculados */}
+              {selectedId && basketLinked.length > 0 && (
+                <button onClick={unlinkSpecific} disabled={saving}
+                  className="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded bg-orange-500/20 border border-orange-500/50 text-orange-300 hover:bg-orange-500/40 disabled:opacity-40 transition-colors">
+                  {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Link2Off className="w-3 h-3" />}
+                  Desvincular {basketLinked.length}
+                </button>
               )}
-              {selectedId && (links[selectedId]?.length ?? 0) > 0 && (
+
+              {/* Desvincular todo (sin basket activo) */}
+              {selectedId && basket.length === 0 && currentLinks.length > 0 && (
                 <button onClick={unlinkElements} disabled={saving}
-                  className="flex items-center gap-1 text-[10px] px-2 py-1 rounded border border-red-500/40 text-red-300 hover:bg-red-500/20 disabled:opacity-40 transition-colors">
-                  <Link2Off className="w-3 h-3" /> Desvincular
+                  className="flex items-center gap-1 text-[10px] px-2 py-1 rounded border border-red-500/40 text-red-300 hover:bg-red-500/20 disabled:opacity-40 transition-colors"
+                  title="Eliminar todos los vínculos de esta actividad">
+                  <Link2Off className="w-3 h-3" /> Todo ({currentLinks.length})
                 </button>
               )}
 
@@ -581,6 +774,7 @@ export default function WeeklyPlanLayout() {
                 onClick={() => {
                   setIsNew(true);
                   setSelectedId(null);
+                  setSelectedIds(new Set());
                   setEditDraft({ ...emptyActivity(currentProject?.id), id: '__new__' });
                 }}
                 className="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded bg-emerald-500 hover:bg-emerald-400 transition-colors ml-1">
@@ -595,152 +789,20 @@ export default function WeeklyPlanLayout() {
         </div>
 
         {!panelMin && (
-          <div className="flex flex-1 overflow-hidden min-h-0">
+          /* ── Unified scroll container: rows span both left data + gantt ── */
+          <div className="flex-1 overflow-auto min-h-0">
+            <div style={{ minWidth: 440 + ganttWidth }}>
 
-            {/* ── Activity list (left, 420px for inline inputs) ─────────── */}
-            <div className="flex flex-col shrink-0 border-r border-slate-200 bg-white overflow-hidden" style={{ width: 440 }}>
-
-              {/* Column header */}
-              <div className="shrink-0 flex items-center px-3 bg-slate-50 border-b border-slate-200 text-[10px] font-semibold text-slate-500 uppercase tracking-wide" style={{ height: 28 }}>
-                <span className="flex-1">Actividades {!loading && `(${filtered.length})`}</span>
-                <span className="w-20 text-center mr-1">Inicio</span>
-                <span className="w-20 text-center mr-6">Fin</span>
-              </div>
-
-              {/* New activity form */}
-              {isNew && editDraft && (
-                <div className="shrink-0 bg-blue-50 border-b border-blue-200 p-2">
-                  <ActivityForm draft={editDraft} onChange={setEditDraft} onSave={() => saveActivity(editDraft)} onCancel={() => { setIsNew(false); setEditDraft(null); }} saving={saving} isNew />
+              {/* ── Sticky header row ─────────────────────────────────────── */}
+              <div className="sticky top-0 z-20 flex border-b border-slate-200">
+                {/* Left column header */}
+                <div className="shrink-0 flex items-center px-3 bg-slate-50 border-r border-slate-300 text-[10px] font-semibold text-slate-500 uppercase tracking-wide" style={{ width: 440, height: 28 }}>
+                  <span className="flex-1">Actividades {!loading && `(${filtered.length})`}</span>
+                  <span className="w-20 text-center mr-1">Inicio</span>
+                  <span className="w-20 text-center mr-4">Fin</span>
                 </div>
-              )}
-
-              {/* List */}
-              <div className="flex-1 overflow-y-auto">
-                {loading ? (
-                  <div className="flex items-center justify-center h-16 text-slate-400 text-sm gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin" /> Cargando…
-                  </div>
-                ) : filtered.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-20 text-slate-400 text-xs gap-1">
-                    <CalendarDays className="w-5 h-5" />
-                    Sin actividades. Haz clic en "+ Nueva"
-                  </div>
-                ) : filtered.map(act => {
-                  const isSelected = act.id === selectedId;
-                  const color      = act.color || discColor(act.discipline);
-                  const linkCount  = links[act.id]?.length ?? 0;
-                  const isEditing  = isSelected && editDraft && !isNew;
-                  return (
-                    <div key={act.id}
-                         draggable
-                         onDragStart={(e) => { setDraggedId(act.id); e.dataTransfer.effectAllowed = 'move'; }}
-                         onDragOver={(e) => e.preventDefault()}
-                         onDrop={(e) => handleRowDrop(e, act.id)}>
-                      <div
-                        onClick={() => {
-                          if (isSelected && isEditing) return;
-                          setSelectedId(act.id);
-                          setIsNew(false);
-                          setEditDraft(null);
-                        }}
-                        style={{ borderLeft: `3px solid ${color}`, height: ROW_H }}
-                        className={`group flex items-center px-1 cursor-pointer select-none transition-colors relative
-                          ${isSelected ? 'bg-blue-50' : 'hover:bg-slate-50'}
-                          ${draggedId === act.id ? 'opacity-40' : ''}`}>
-                        
-                        {/* Drag Handle & Bullet Badge */}
-                        <div className="flex shrink-0 items-center justify-center w-8 mr-1 text-slate-300 group-hover:text-slate-500 cursor-grab active:cursor-grabbing">
-                          <GripHorizontal className="w-3 h-3 mr-1" />
-                          {linkCount > 0 ? (
-                            <span className="text-[8px] px-1 py-0.5 rounded font-bold text-white shadow-sm" style={{ background: color }}>{linkCount}</span>
-                          ) : (
-                            <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
-                          )}
-                        </div>
-                        
-                        {/* Discipline Select */}
-                        <div className="w-[42px] shrink-0 flex justify-center mr-1">
-                          <select
-                            value={act.discipline || ''}
-                            onChange={e => updateActivityField(act, 'discipline', e.target.value)}
-                            onClick={e => e.stopPropagation()}
-                            className="w-full text-[7.5px] font-bold text-white bg-transparent outline-none cursor-pointer text-center appearance-none rounded px-0.5 py-0.5 focus:ring-1 focus:ring-white/50"
-                            style={{ backgroundColor: discColor(act.discipline) }}
-                            title="Cambiar Especialidad"
-                          >
-                            <option value="" className="text-black bg-white">---</option>
-                            {DISCIPLINES.map(d => <option key={d} value={d} className="text-black bg-white">{d.substring(0,3)}</option>)}
-                          </select>
-                        </div>
-                        
-                        {/* Title Input */}
-                        <input 
-                          type="text" 
-                          value={act.title || ''}
-                          onChange={e => setActivities(p => p.map(a => a.id === act.id ? { ...a, title: e.target.value } : a))}
-                          onBlur={e => updateActivityField(act, 'title', e.target.value)}
-                          onClick={e => e.stopPropagation()}
-                          className="flex-1 text-[10px] font-semibold text-slate-700 truncate pr-2 bg-transparent border border-transparent focus:bg-white focus:border-blue-300 rounded px-1 min-w-[50px]" 
-                        />
-                        
-                        {/* Start Date Input */}
-                        <input
-                          type="date"
-                          value={act.start_date || ''}
-                          onChange={e => setActivities(p => p.map(a => a.id === act.id ? { ...a, start_date: e.target.value } : a))}
-                          onBlur={e => updateActivityField(act, 'start_date', e.target.value)}
-                          onClick={e => e.stopPropagation()}
-                          className="w-[72px] text-[9.5px] text-slate-600 bg-transparent border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-300 rounded px-0.5 py-0.5 transition-colors cursor-text [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer mr-0.5"
-                        />
-                        
-                        {/* End Date Input */}
-                        <input
-                          type="date"
-                          value={act.end_date || ''}
-                          onChange={e => setActivities(p => p.map(a => a.id === act.id ? { ...a, end_date: e.target.value } : a))}
-                          onBlur={e => updateActivityField(act, 'end_date', e.target.value)}
-                          onClick={e => e.stopPropagation()}
-                          className="w-[72px] text-[9.5px] text-slate-600 bg-transparent border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-300 rounded px-0.5 py-0.5 transition-colors cursor-text [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer mr-1"
-                        />
-                        
-                        {/* Actions on Hover OR Link Prompt */}
-                        {isSelected && viewerSel.length > 0 ? (
-                          <div className="absolute right-1 flex items-center gap-1 bg-white/95 px-1 py-0.5 rounded shadow-sm border border-emerald-300 z-10 transition-all">
-                            <button onClick={e => { e.stopPropagation(); linkElements(); }} disabled={saving}
-                              className="flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500 hover:bg-emerald-400 text-white transition-colors disabled:opacity-50" title="Guardar elementos seleccionados a esta actividad">
-                              {saving ? <Loader2 className="w-3 h-3 animate-spin"/> : <><Check className="w-3 h-3"/> Guardar ({viewerSel.length})</>}
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="absolute right-1 hidden group-hover:flex items-center gap-1 bg-white/95 px-1 py-0.5 rounded shadow-sm border border-slate-200 z-10">
-                            <button onClick={e => { e.stopPropagation(); deleteActivity(act.id); }}
-                              className="text-slate-400 hover:text-red-600 transition-colors p-0.5 rounded" title="Eliminar actividad">
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                      {/* Inline edit form */}
-                      {isSelected && editDraft && !isNew && (
-                        <div className="bg-blue-50 border-b border-blue-200 p-2">
-                          <ActivityForm draft={editDraft} onChange={setEditDraft}
-                            onSave={() => saveActivity(editDraft)}
-                            onCancel={() => setEditDraft(null)}
-                            saving={saving} isNew={false} />
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* ── 3-week Gantt (right) ──────────────────────────────────── */}
-            <div className="flex-1 overflow-auto">
-              <div style={{ width: ganttWidth, position: 'relative', minHeight: '100%' }}>
-
                 {/* Day headers */}
-                <div className="sticky top-0 z-20 flex bg-slate-700 border-b border-slate-600" style={{ height: 28 }}>
+                <div className="flex bg-slate-700" style={{ height: 28 }}>
                   {Array.from({ length: DAYS }, (_, i) => {
                     const day     = addDays(weekStart, i);
                     const isToday = daysBetween(today, day) === 0;
@@ -756,108 +818,385 @@ export default function WeeklyPlanLayout() {
                     );
                   })}
                 </div>
+              </div>
 
-                {/* 4D Scrubber line integration */}
-                <div className="absolute top-0 bottom-0 min-h-full border-l-2 border-red-500 z-10 opacity-60 pointer-events-none"
-                     style={{ left: daysBetween(weekStart, currentDate) * PX_PER_DAY, display: Math.abs(daysBetween(weekStart, currentDate)) <= DAYS ? 'block' : 'none' }} />
+              {/* ── New activity form row ──────────────────────────────────── */}
+              {isNew && editDraft && (
+                <div className="flex bg-blue-50 border-b border-blue-200">
+                  <div className="shrink-0 p-2 border-r border-blue-200" style={{ width: 440 }}>
+                    <ActivityForm draft={editDraft} onChange={setEditDraft} onSave={() => saveActivity(editDraft)} onCancel={() => { setIsNew(false); setEditDraft(null); }} saving={saving} isNew />
+                  </div>
+                  <div className="flex-1" />
+                </div>
+              )}
 
-                {/* Activity rows */}
-                {filtered.map((act, idx) => {
-                  const color    = act.color || discColor(act.discipline);
-                  const isSelected = act.id === selectedId;
-                  const isDirty  = dirtyIds.has(act.id);
-                  const s = toDate(act.start_date);
-                  const e = toDate(act.end_date);
-                  const barLeft  = daysBetween(weekStart, s) * PX_PER_DAY;
-                  const barWidth = Math.max(PX_PER_DAY * 0.5, daysBetween(s, addDays(e, 1)) * PX_PER_DAY);
+              {/* ── Loading / Empty states ─────────────────────────────────── */}
+              {loading && (
+                <div className="flex items-center justify-center h-16 text-slate-400 text-sm gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" /> Cargando…
+                </div>
+              )}
+              {!loading && filtered.length === 0 && (
+                <div className="flex flex-col items-center justify-center h-20 text-slate-400 text-xs gap-1">
+                  <CalendarDays className="w-5 h-5" />
+                  Sin actividades. Haz clic en "+ Nueva"
+                </div>
+              )}
 
-                  const clampLeft  = Math.max(0, barLeft);
-                  const clampRight = Math.min(ganttWidth, barLeft + barWidth);
-                  const visible    = clampRight > clampLeft;
+              {/* ── Activity rows grouped by discipline ────────────────────── */}
+              {grouped.map(({ discipline, acts: groupActs }) => {
+                const isCollapsed  = collapsedDiscs.has(discipline);
+                const dColor       = discColor(discipline);
+                const linkedInGroup = groupActs.reduce((s, a) => s + (links[a.id]?.length ?? 0), 0);
 
-                  return (
-                    <div key={act.id}
-                      onClick={() => setSelectedId(act.id)}
-                      className={`relative flex items-center border-b border-slate-100 cursor-pointer
-                        ${isSelected ? 'bg-blue-50' : idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}
-                        hover:bg-blue-50/50 transition-colors`}
-                      style={{ height: ROW_H }}>
+                return (
+                  <div key={discipline}>
+                    {/* ── Discipline group header ── */}
+                    <div
+                      className="flex border-b border-slate-300 bg-slate-100 cursor-pointer select-none hover:bg-slate-200 transition-colors"
+                      style={{ height: 24 }}
+                      onClick={() => setCollapsedDiscs(p => {
+                        const n = new Set(p);
+                        n.has(discipline) ? n.delete(discipline) : n.add(discipline);
+                        return n;
+                      })}>
+                      <div
+                        className="shrink-0 flex items-center gap-1.5 px-2 border-r border-slate-300"
+                        style={{ width: 440, borderLeft: `3px solid ${dColor}` }}>
+                        {isCollapsed
+                          ? <ChevronRight className="w-3 h-3 text-slate-500 shrink-0" />
+                          : <ChevronDown  className="w-3 h-3 text-slate-500 shrink-0" />}
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ background: dColor }} />
+                        <span className="text-[10px] font-bold text-slate-700 truncate">{discipline || 'General'}</span>
+                        <span className="text-[9px] text-slate-400 shrink-0">({groupActs.length})</span>
+                        {linkedInGroup > 0 && (
+                          <span className="text-[9px] text-emerald-600 font-semibold shrink-0">· {linkedInGroup} vinc.</span>
+                        )}
+                      </div>
+                      <div className="flex-1 bg-slate-100/80" />
+                    </div>
 
-                      {/* Weekend shading */}
-                      {Array.from({ length: DAYS }, (_, i) => {
-                        const day = addDays(weekStart, i);
-                        const wd  = day.getDay();
-                        if (wd !== 0 && wd !== 6) return null;
-                        return <div key={i} className="absolute top-0 bottom-0 bg-slate-100/60 pointer-events-none" style={{ left: i * PX_PER_DAY, width: PX_PER_DAY }} />;
-                      })}
+                    {/* ── Rows for this discipline (hidden when collapsed) ── */}
+                    {!isCollapsed && (
+                    <>{groupActs.map((act, idx) => {
+                const color      = act.color || discColor(act.discipline);
+                const isSelected = selectedIds.has(act.id);
+                const isPrimary  = act.id === selectedId; // primary selection (chip panel, toolbar ops)
+                const isDirty    = dirtyIds.has(act.id);
+                const linkCount  = links[act.id]?.length ?? 0;
+                const isEditing  = isPrimary && editDraft && !isNew;
 
-                      {/* Selection background highlight */}
-                      {isSelected && <div className="absolute inset-0 bg-blue-50/50 pointer-events-none" />}
+                const s          = toDate(act.start_date);
+                const e          = toDate(act.end_date);
+                const barLeft    = daysBetween(weekStart, s) * PX_PER_DAY;
+                const barWidth   = Math.max(PX_PER_DAY * 0.5, daysBetween(s, addDays(e, 1)) * PX_PER_DAY);
+                const clampLeft  = Math.max(0, barLeft);
+                const clampRight = Math.min(ganttWidth, barLeft + barWidth);
+                const visible    = clampRight > clampLeft;
 
-                      {/* Dirty Indicator / Save Button Overlay */}
-                      {isDirty && (
-                        <div className="absolute left-0 h-full flex items-center px-1 z-30 pointer-events-none">
-                          <div className="flex items-center gap-0.5 pointer-events-auto">
-                            <button 
-                              onClick={e => { e.stopPropagation(); saveActivity(act); setDirtyIds(p => { const n = new Set(p); n.delete(act.id); return n; }); }}
-                              className="bg-emerald-600 hover:bg-emerald-500 text-white p-1 rounded-sm shadow-lg flex items-center gap-1 text-[8.5px] font-bold h-5 uppercase transition-transform active:scale-95">
-                              <Check className="w-3 h-3"/> Guardar
-                            </button>
-                            <button 
-                              onClick={e => { 
-                                e.stopPropagation(); 
-                                setDirtyIds(p => { const n = new Set(p); n.delete(act.id); return n; });
-                                load(); // Revert by reloading from DB
-                              }}
-                              className="bg-slate-500 hover:bg-slate-400 text-white p-1 rounded-sm shadow-lg h-5 transition-transform active:scale-95">
-                              <X className="w-3 h-3"/>
+                return (
+                  <div key={act.id}
+                    draggable
+                    onDragStart={ev => { setDraggedId(act.id); ev.dataTransfer.effectAllowed = 'move'; }}
+                    onDragEnd={() => setDraggedId(null)}
+                    onDragOver={ev => ev.preventDefault()}
+                    onDrop={ev => handleRowDrop(ev, act.id)}>
+
+                    {/* ── Main data + Gantt row (same height, same flex) ── */}
+                    <div
+                      className={`flex border-b border-slate-100 cursor-pointer transition-colors
+                        ${isPrimary ? 'bg-blue-100' : isSelected ? 'bg-blue-50' : idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}
+                        ${draggedId === act.id ? 'opacity-40' : ''}
+                        hover:bg-blue-50/50`}
+                      style={{ height: ROW_H }}
+                      onClick={() => {
+                        if (isPrimary && isEditing) return;
+                        if (multiSelect) {
+                          setSelectedIds(prev => {
+                            const n = new Set(prev);
+                            n.has(act.id) ? n.delete(act.id) : n.add(act.id);
+                            return n;
+                          });
+                          setSelectedId(act.id);
+                        } else {
+                          setSelectedId(act.id);
+                          setSelectedIds(new Set([act.id]));
+                        }
+                        setChipSel(null);
+                        setIsNew(false);
+                        setEditDraft(null);
+                        // Auto-zoom al modelo cuando la actividad tiene elementos vinculados
+                        const actLinks = links[act.id];
+                        if (actLinks?.length) viewerApiRef.current?.zoomToElements(actLinks);
+                      }}>
+
+                      {/* ── Left data column ── */}
+                      <div
+                        className="group shrink-0 flex items-center px-1 border-r border-slate-200 relative"
+                        style={{ width: 440, borderLeft: `3px solid ${color}` }}>
+
+                        {/* Multi-select checkbox */}
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(act.id)}
+                          onChange={ev => {
+                            ev.stopPropagation();
+                            const adding = !selectedIds.has(act.id);
+                            setSelectedIds(prev => {
+                              const n = new Set(prev);
+                              adding ? n.add(act.id) : n.delete(act.id);
+                              return n;
+                            });
+                            if (adding) {
+                              setSelectedId(act.id);
+                              const actLinks = links[act.id];
+                              if (actLinks?.length) viewerApiRef.current?.zoomToElements(actLinks);
+                            }
+                          }}
+                          onClick={ev => ev.stopPropagation()}
+                          className="shrink-0 mr-1 accent-blue-500 cursor-pointer w-3 h-3"
+                          title="Seleccionar actividad"
+                        />
+
+                        {/* Drag handle + link badge */}
+                        <div className="flex shrink-0 items-center justify-center w-8 mr-1 text-slate-300 group-hover:text-slate-500 cursor-grab active:cursor-grabbing">
+                          <GripHorizontal className="w-3 h-3 mr-1" />
+                          {linkCount > 0 ? (
+                            <span className="text-[8px] px-1 py-0.5 rounded font-bold text-white shadow-sm bg-emerald-500">{linkCount}</span>
+                          ) : (
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+                          )}
+                        </div>
+
+                        {/* Discipline select */}
+                        <div className="w-[42px] shrink-0 flex justify-center mr-1">
+                          <select
+                            value={act.discipline || ''}
+                            onChange={ev => updateActivityField(act, 'discipline', ev.target.value)}
+                            onClick={ev => ev.stopPropagation()}
+                            className="w-full text-[7.5px] font-bold text-white outline-none cursor-pointer text-center appearance-none rounded px-0.5 py-0.5 focus:ring-1 focus:ring-white/50"
+                            style={{ backgroundColor: discColor(act.discipline) }}
+                            title="Cambiar Especialidad">
+                            <option value="" className="text-black bg-white">---</option>
+                            {DISCIPLINES.map(d => <option key={d} value={d} className="text-black bg-white">{d.substring(0, 3)}</option>)}
+                          </select>
+                        </div>
+
+                        {/* Title */}
+                        <input
+                          type="text"
+                          value={act.title || ''}
+                          onChange={ev => setActivities(p => p.map(a => a.id === act.id ? { ...a, title: ev.target.value } : a))}
+                          onBlur={ev => updateActivityField(act, 'title', ev.target.value)}
+                          onClick={ev => ev.stopPropagation()}
+                          className="flex-1 text-[10px] font-semibold text-slate-700 truncate pr-2 bg-transparent border border-transparent focus:bg-white focus:border-blue-300 rounded px-1 min-w-[50px]"
+                        />
+
+                        {/* Start date */}
+                        <input
+                          type="date"
+                          value={act.start_date || ''}
+                          onChange={ev => setActivities(p => p.map(a => a.id === act.id ? { ...a, start_date: ev.target.value } : a))}
+                          onBlur={ev => updateActivityField(act, 'start_date', ev.target.value)}
+                          onClick={ev => ev.stopPropagation()}
+                          className="w-[72px] text-[9.5px] text-slate-600 bg-transparent border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-300 rounded px-0.5 py-0.5 transition-colors cursor-text [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer mr-0.5"
+                        />
+
+                        {/* End date */}
+                        <input
+                          type="date"
+                          value={act.end_date || ''}
+                          onChange={ev => setActivities(p => p.map(a => a.id === act.id ? { ...a, end_date: ev.target.value } : a))}
+                          onBlur={ev => updateActivityField(act, 'end_date', ev.target.value)}
+                          onClick={ev => ev.stopPropagation()}
+                          className="w-[72px] text-[9.5px] text-slate-600 bg-transparent border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-300 rounded px-0.5 py-0.5 transition-colors cursor-text [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer mr-1"
+                        />
+
+                        {/* Hover actions */}
+                        {isSelected && viewerSel.length > 0 ? (
+                          <div className="absolute right-1 flex items-center gap-1 bg-white/95 px-1 py-0.5 rounded shadow-sm border border-emerald-300 z-10">
+                            <button onClick={ev => { ev.stopPropagation(); linkElements(); }} disabled={saving}
+                              className="flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500 hover:bg-emerald-400 text-white disabled:opacity-50">
+                              {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <><Check className="w-3 h-3" /> Guardar ({viewerSel.length})</>}
                             </button>
                           </div>
-                        </div>
-                      )}
+                        ) : (
+                          <div className="absolute right-1 hidden group-hover:flex items-center gap-1 bg-white/95 px-1 py-0.5 rounded shadow-sm border border-slate-200 z-10">
+                            {/* Zoom + Ghost */}
+                            {linkCount > 0 && (
+                              <button
+                                onClick={ev => { ev.stopPropagation(); viewerApiRef.current?.zoomToElements(links[act.id] ?? []); }}
+                                title="Zoom + Ghost a esta actividad"
+                                className="text-slate-400 hover:text-blue-600 transition-colors p-0.5 rounded">
+                                <Maximize2 className="w-3 h-3" />
+                              </button>
+                            )}
+<button onClick={ev => { ev.stopPropagation(); deleteActivity(act.id); }}
+                              className="text-slate-400 hover:text-red-600 transition-colors p-0.5 rounded">
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
 
-                      {/* Gantt bar */}
-                      {visible && (
+                      {/* ── Gantt column ── */}
+                      <div className="relative flex-1 overflow-hidden" style={{ minWidth: ganttWidth }}>
+
+                        {/* 4D scrubber */}
+                        {Math.abs(daysBetween(weekStart, currentDate)) <= DAYS && (
+                          <div className="absolute top-0 bottom-0 border-l-2 border-red-500 z-10 opacity-60 pointer-events-none"
+                            style={{ left: daysBetween(weekStart, currentDate) * PX_PER_DAY }} />
+                        )}
+
+                        {/* Weekend shading */}
+                        {Array.from({ length: DAYS }, (_, i) => {
+                          const day = addDays(weekStart, i);
+                          const wd  = day.getDay();
+                          if (wd !== 0 && wd !== 6) return null;
+                          return <div key={i} className="absolute top-0 bottom-0 bg-slate-100/60 pointer-events-none" style={{ left: i * PX_PER_DAY, width: PX_PER_DAY }} />;
+                        })}
+
+                        {/* Selected row highlight */}
+                        {isSelected && <div className="absolute inset-0 bg-blue-50/50 pointer-events-none" />}
+
+                        {/* Dirty save/revert */}
+                        {isDirty && (
+                          <div className="absolute left-1 top-0 bottom-0 flex items-center z-30">
+                            <div className="flex items-center gap-0.5">
+                              <button
+                                onClick={ev => { ev.stopPropagation(); saveActivity(act); setDirtyIds(p => { const n = new Set(p); n.delete(act.id); return n; }); }}
+                                className="bg-emerald-600 hover:bg-emerald-500 text-white p-1 rounded-sm shadow-lg flex items-center gap-1 text-[8.5px] font-bold h-5 uppercase active:scale-95">
+                                <Check className="w-3 h-3" /> Guardar
+                              </button>
+                              <button
+                                onClick={ev => { ev.stopPropagation(); setDirtyIds(p => { const n = new Set(p); n.delete(act.id); return n; }); load(); }}
+                                className="bg-slate-500 hover:bg-slate-400 text-white p-1 rounded-sm shadow-lg h-5 active:scale-95">
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Gantt bar — color = discipline color for coherence with left column */}
+                        {visible && (
+                          <div
+                            className="absolute rounded select-none cursor-grab active:cursor-grabbing"
+                            style={{
+                              left:      clampLeft,
+                              width:     clampRight - clampLeft,
+                              top:       4,
+                              height:    20,
+                              background: color,
+                              opacity:   isSelected ? 1 : 0.82,
+                              boxShadow: isSelected ? `0 0 0 2px white, 0 0 0 3px ${color}` : undefined,
+                            }}
+                            onMouseDown={ev => onBarMouseDown(ev, act, 'move')}>
+                            {/* Left resize */}
+                            {barLeft >= 0 && (
+                              <div className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize"
+                                style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '3px 0 0 3px' }}
+                                onMouseDown={ev => onBarMouseDown(ev, act, 'start')} />
+                            )}
+                            {/* Progress */}
+                            {act.progress > 0 && (
+                              <div className="absolute inset-y-0 left-2 rounded bg-black/20"
+                                style={{ width: `calc(${act.progress}% - 8px)` }} />
+                            )}
+                            {/* Label */}
+                            <span className="absolute inset-0 flex items-center px-2 text-[9.5px] font-bold text-white truncate pointer-events-none drop-shadow-sm">
+                              {(clampRight - clampLeft) > 60 ? act.title : ''}
+                            </span>
+                            {/* Right resize */}
+                            {barLeft + barWidth <= ganttWidth && (
+                              <div className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize"
+                                style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '0 3px 3px 0' }}
+                                onMouseDown={ev => onBarMouseDown(ev, act, 'end')} />
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* ── Linked elements chips (visible for primary selection only) ── */}
+                    {isPrimary && linkCount > 0 && (
+                      <>
+                        {/* Toggle bar */}
                         <div
-                          className="absolute rounded select-none cursor-grab active:cursor-grabbing"
-                          style={{
-                            left:            clampLeft,
-                            width:           clampRight - clampLeft,
-                            top:             7,
-                            height:          20,
-                            background:      color,
-                            opacity:         isSelected ? 1 : 0.82,
-                            boxShadow:       isSelected ? `0 0 0 2px white, 0 0 0 3px ${color}` : undefined,
-                          }}
-                          onMouseDown={e => onBarMouseDown(e, act, 'move')}
-                        >
-                          {/* Left resize handle */}
-                          {barLeft >= 0 && (
-                            <div className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize"
-                              style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '3px 0 0 3px' }}
-                              onMouseDown={e => onBarMouseDown(e, act, 'start')} />
-                          )}
-                          {/* Progress fill */}
-                          {act.progress > 0 && (
-                            <div className="absolute inset-y-0 left-2 rounded bg-black/20"
-                              style={{ width: `calc(${act.progress}% - 8px)` }} />
-                          )}
-                          {/* Label inside bar */}
-                          <span className="absolute inset-0 flex items-center px-2 text-[9.5px] font-bold text-white truncate pointer-events-none drop-shadow-sm">
-                            {barWidth > 60 ? act.title : ''}
+                          className="flex items-center gap-1.5 px-2 bg-emerald-50 border-b border-emerald-200 cursor-pointer hover:bg-emerald-100 transition-colors select-none"
+                          style={{ height: 20 }}
+                          onClick={ev => { ev.stopPropagation(); setShowChips(p => !p); }}>
+                          {showChips
+                            ? <ChevronDown  className="w-3 h-3 text-emerald-600 shrink-0" />
+                            : <ChevronRight className="w-3 h-3 text-emerald-600 shrink-0" />}
+                          <span className="text-[9px] font-bold text-emerald-700 uppercase tracking-wide">
+                            {linkCount} elemento{linkCount !== 1 ? 's' : ''} vinculado{linkCount !== 1 ? 's' : ''}
                           </span>
-                          {/* Right resize handle */}
-                          {barLeft + barWidth <= ganttWidth && (
-                            <div className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize"
-                              style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '0 3px 3px 0' }}
-                              onMouseDown={e => onBarMouseDown(e, act, 'end')} />
+                          {pendingRemove.size > 0 && (
+                            <span className="text-[9px] text-red-500 font-semibold">· {pendingRemove.size} por eliminar</span>
                           )}
                         </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+
+                        {/* Chip panel */}
+                        {showChips && (
+                          <div className="flex items-center flex-wrap gap-1 px-2 py-1.5 bg-emerald-50 border-b border-emerald-200">
+                            {(links[act.id] ?? []).map(extId => {
+                              const isChipActive  = chipSel === extId;
+                              const isPending     = pendingRemove.has(extId);
+                              return (
+                                <span key={extId}
+                                  onClick={ev => { ev.stopPropagation(); setChipSel(isChipActive ? null : extId); }}
+                                  title={extId}
+                                  className={`flex items-center gap-0.5 shrink-0 rounded px-1.5 py-0.5 text-[9px] font-mono cursor-pointer transition-colors
+                                    ${isPending
+                                      ? 'bg-red-100 border border-red-400 text-red-700 line-through opacity-70'
+                                      : isChipActive
+                                        ? 'bg-amber-400 border border-amber-500 text-white font-bold shadow-sm'
+                                        : 'bg-emerald-100 border border-emerald-300 text-emerald-800 hover:bg-emerald-200'}`}>
+                                  <span>{extId.length > 12 ? `…${extId.slice(-10)}` : extId}</span>
+                                  <button
+                                    onClick={ev => { ev.stopPropagation(); togglePending(extId); }}
+                                    title={isPending ? 'Desmarcar' : 'Marcar para eliminar'}
+                                    className={`ml-0.5 transition-colors leading-none ${isPending ? 'text-red-500 hover:text-red-700' : 'text-emerald-400 hover:text-red-500'}`}>
+                                    <X className="w-2.5 h-2.5" />
+                                  </button>
+                                </span>
+                              );
+                            })}
+
+                            {/* Save removal button */}
+                            {pendingRemove.size > 0 && (
+                              <button
+                                onClick={ev => { ev.stopPropagation(); savePendingRemovals(); }}
+                                disabled={saving}
+                                className="flex items-center gap-1 shrink-0 px-2 py-0.5 rounded bg-red-500 hover:bg-red-400 text-white text-[9px] font-bold transition-colors disabled:opacity-50">
+                                {saving ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Trash2 className="w-2.5 h-2.5" />}
+                                Eliminar {pendingRemove.size}
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {/* ── Inline edit form — spans full width ── */}
+                    {isEditing && (
+                      <div className="flex bg-blue-50 border-b border-blue-200">
+                        <div className="shrink-0 p-2 border-r border-blue-200" style={{ width: 440 }}>
+                          <ActivityForm draft={editDraft} onChange={setEditDraft}
+                            onSave={() => saveActivity(editDraft)}
+                            onCancel={() => setEditDraft(null)}
+                            saving={saving} isNew={false} />
+                        </div>
+                        <div className="flex-1" />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}</>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}

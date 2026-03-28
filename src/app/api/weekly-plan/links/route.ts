@@ -10,7 +10,7 @@ const supabase = createClient(
 export async function GET(req: NextRequest) {
   const projectId = req.nextUrl.searchParams.get('projectId');
   const modelUrn  = req.nextUrl.searchParams.get('modelUrn');
-  let q = supabase.from('weekly_plan_links').select('activity_id, external_id');
+  let q = supabase.from('weekly_plan_links').select('activity_id, external_id').limit(5000);
   if (projectId) q = q.eq('project_id', projectId);
   if (modelUrn)  q = q.eq('model_urn',  modelUrn);
   const { data, error } = await q;
@@ -24,30 +24,43 @@ export async function GET(req: NextRequest) {
 }
 
 // POST { activityId, projectId, modelUrn, externalIds[] }
+// Chunks inserts into batches of 50 to avoid PostgREST row limits
 export async function POST(req: NextRequest) {
   const { activityId, projectId, modelUrn, externalIds } = await req.json();
   if (!activityId || !externalIds?.length)
     return NextResponse.json({ error: 'activityId and externalIds required' }, { status: 400 });
-  const rows = externalIds.map((extId: string) => ({
+
+  const rows = (externalIds as string[]).map(extId => ({
     activity_id: activityId,
     project_id:  projectId,
     model_urn:   modelUrn,
     external_id: extId,
   }));
-  const { error } = await supabase
-    .from('weekly_plan_links')
-    .upsert(rows, { onConflict: 'activity_id,model_urn,external_id' });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Chunk into batches of 50 to safely handle large element sets (100+)
+  const CHUNK = 50;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const batch = rows.slice(i, i + CHUNK);
+    const { error } = await supabase
+      .from('weekly_plan_links')
+      .upsert(batch, { onConflict: 'activity_id,model_urn,external_id' });
+    if (error) return NextResponse.json({ error: error.message, batch: i }, { status: 500 });
+  }
+
   return NextResponse.json({ ok: true, count: rows.length });
 }
 
-// DELETE { activityId }   → removes all links for that activity
+// DELETE { activityId }                        → removes ALL links for that activity
+// DELETE { activityId, externalIds: string[] } → removes ONLY those specific elements
 export async function DELETE(req: NextRequest) {
-  const { activityId } = await req.json();
-  const { error } = await supabase
-    .from('weekly_plan_links')
-    .delete()
-    .eq('activity_id', activityId);
+  const { activityId, externalIds } = await req.json();
+  if (!activityId) return NextResponse.json({ error: 'activityId required' }, { status: 400 });
+
+  let q = supabase.from('weekly_plan_links').delete().eq('activity_id', activityId);
+  if (externalIds?.length) {
+    q = q.in('external_id', externalIds);
+  }
+  const { error } = await q;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

@@ -1,11 +1,16 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { Loader2, Box, AlertCircle, RefreshCw } from 'lucide-react';
 
 declare global { interface Window { Autodesk: any; THREE: any } }
 
 export interface ElementColor { externalId: string; hex: string; alpha?: number }
+
+// API exposed to parent via ref
+export interface APSViewer4DHandle {
+  zoomToElements: (externalIds: string[]) => void;
+}
 
 function hexToVec4(hex: string, alpha = 0.85): any {
   const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
@@ -18,84 +23,145 @@ function hexToVec4(hex: string, alpha = 0.85): any {
   );
 }
 
+
 interface APSViewer4DProps {
   onSelectionChange?: (externalIds: string[]) => void;
   onModelUrnReady?:   (urn: string) => void;
-  /** Elements to color (in-progress tasks) */
   elementColors?:     ElementColor[];
-  /** Elements that are "done" — visible at original model color, not ghosted, no theming */
   doneIds?:           string[];
   globalGrey?:        boolean;
+  selection?:         string[];
+  disciplineFilter?:  string;
+  /** ExternalIds to hard-isolate (from linked activities of the filtered discipline) */
+  isolateIds?:        string[];
 }
 
-export default function APSViewer4D({
+const APSViewer4D = forwardRef<APSViewer4DHandle, APSViewer4DProps>(function APSViewer4D({
   onSelectionChange,
   onModelUrnReady,
   elementColors,
   doneIds,
   globalGrey = true,
-}: APSViewer4DProps = {}) {
-  const containerRef        = useRef<HTMLDivElement>(null);
-  const viewerRef           = useRef<any>(null);
-  const extIdToDbIdRef      = useRef<Record<string, number>>({});
-  const dbIdToExtIdRef      = useRef<Record<number, string>>({});
-  const elementColorsRef    = useRef<ElementColor[]>([]);
-  const doneIdsRef          = useRef<string[]>([]);
-  const modelLoadedRef      = useRef(false);
+  selection = [],
+  disciplineFilter = '',
+  isolateIds,
+}, ref) {
+  const containerRef     = useRef<HTMLDivElement>(null);
+  const viewerRef        = useRef<any>(null);
+  const extIdToDbIdRef   = useRef<Record<string, number>>({});
+  const dbIdToExtIdRef   = useRef<Record<number, string>>({});
+  const elementColorsRef = useRef<ElementColor[]>([]);
+  const doneIdsRef       = useRef<string[]>([]);
+  const modelLoadedRef   = useRef(false);
+  const globalGreyRef    = useRef<boolean>(true);
 
   const [sdkReady,    setSdkReady]    = useState(false);
   const [viewerReady, setViewerReady] = useState(false);
   const [status,      setStatus]      = useState('Inicializando Viewer…');
   const [error,       setError]       = useState('');
   const [modelName,   setModelName]   = useState('');
-  const globalGreyRef    = useRef<boolean>(true);
+  const [filterDbIds, setFilterDbIds] = useState<number[] | null>(null);
 
-  // Keep refs in sync so event handlers see latest values
+  // ── Search model for discipline elements ───────────────────────────────────
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer || !modelLoadedRef.current) return;
+    if (!disciplineFilter) { setFilterDbIds(null); return; }
+
+    viewer.search(
+      disciplineFilter,
+      (dbIds: number[]) => setFilterDbIds(dbIds),
+      (err: any) => { console.error('[APS4D] search error:', err); setFilterDbIds([]); },
+      ['Category', 'Family Name', 'Especialidad', 'Discipline', 'System Type'],
+      { exactMatch: false }
+    );
+  }, [disciplineFilter]);
+
+  // ── Imperative API exposed to parent ──────────────────────────────────────
+  useImperativeHandle(ref, () => ({
+    zoomToElements(externalIds: string[]) {
+      const viewer = viewerRef.current;
+      if (!viewer || !modelLoadedRef.current) return;
+      const dbIds = externalIds.map(id => extIdToDbIdRef.current[id]).filter((id): id is number => id != null);
+      if (!dbIds.length) return;
+      viewer.isolate(dbIds, viewer.model);
+      viewer.fitToView(dbIds, viewer.model);
+    },
+  }), []);
+
+  // Keep refs in sync
   useEffect(() => { elementColorsRef.current = elementColors ?? []; }, [elementColors]);
   useEffect(() => { doneIdsRef.current       = doneIds       ?? []; }, [doneIds]);
   useEffect(() => { globalGreyRef.current    = globalGrey    ?? true; }, [globalGrey]);
 
-  // Apply 4D state whenever props change (if model loaded)
+  // Programmatic selection from parent (chip click)
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer || !modelLoadedRef.current) return;
+    if (!selection?.length) { viewer.clearSelection(); return; }
+    const dbIds = selection.map(id => extIdToDbIdRef.current[id]).filter((id): id is number => id != null);
+    if (dbIds.length) {
+      viewer.select(dbIds, viewer.model);
+      viewer.fitToView(dbIds, viewer.model);
+    }
+  }, [selection]);
 
-    // dbIds of colored (in-progress) elements
+  // Apply 4D colors / ghost state / discipline filter
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer || !modelLoadedRef.current) return;
     const coloredDbIds = (elementColors ?? [])
       .map(({ externalId }) => extIdToDbIdRef.current[externalId])
       .filter((id): id is number => id != null);
-
-    // dbIds of done elements — isolated (not ghosted) but NO theming → original model color
     const doneDbIds = (doneIds ?? [])
       .map(id => extIdToDbIdRef.current[id])
       .filter((id): id is number => id != null);
 
-    // All visible (non-ghost) = colored + done
-    const isolateDbIds = [...coloredDbIds, ...doneDbIds];
+    // Resolve isolateIds (externalIds from parent) → dbIds: most reliable discipline filter
+    const isolateDbIds = isolateIds
+      ? isolateIds.map(id => extIdToDbIdRef.current[id]).filter((id): id is number => id != null)
+      : null;
 
-    if (globalGrey) {
-      viewer.isolate(isolateDbIds.length > 0 ? isolateDbIds : [-1], viewer.model);
+    // Visibility logic (priority: isolateIds > filterDbIds from search > globalGrey)
+    let visibleDbIds: number[] = [];
+
+    const disciplineDbIds = isolateDbIds ?? filterDbIds; // prefer explicit ids over search results
+
+    if (disciplineDbIds !== null) {
+      // Discipline filter active: show only those elements
+      if (globalGrey) {
+        // Intersect with assigned elements so unlinked geometry is still ghosted
+        const assignedSet = new Set([...coloredDbIds, ...doneDbIds]);
+        const intersection = disciplineDbIds.filter(id => assignedSet.has(id));
+        visibleDbIds = intersection.length > 0 ? intersection : disciplineDbIds;
+      } else {
+        visibleDbIds = disciplineDbIds;
+      }
     } else {
-       if (isolateDbIds.length > 0) {
-         viewer.isolate(isolateDbIds, viewer.model);
-       } else {
-         viewer.isolate(undefined, viewer.model);
-       }
+      // No discipline filter — normal 4D behavior
+      if (globalGrey) {
+        const assigned = [...coloredDbIds, ...doneDbIds];
+        visibleDbIds = assigned.length > 0 ? assigned : [-1];
+      } else {
+        viewer.showAll();
+        visibleDbIds = [];
+      }
     }
 
-    // Apply colors only to in-progress elements; done elements keep original color
+    if (visibleDbIds.length > 0 || (filterDbIds !== null && visibleDbIds.length === 0)) {
+      viewer.isolate(visibleDbIds.length > 0 ? visibleDbIds : [-1], viewer.model);
+    }
+
     viewer.clearThemingColors();
     for (const { externalId, hex, alpha } of (elementColors ?? [])) {
       const dbId = extIdToDbIdRef.current[externalId];
       if (dbId == null) continue;
       viewer.setThemingColor(dbId, hexToVec4(hex, alpha ?? 0.95), viewer.model, true);
     }
-
     viewer.impl?.invalidate(true);
-  }, [elementColors, doneIds, globalGrey]);
+  }, [elementColors, doneIds, globalGrey, filterDbIds, isolateIds]);
 
-
-  // Load APS SDK (shared across tabs — idempotent)
+  // Load APS SDK
   useEffect(() => {
     if (window.Autodesk?.Viewing) { setSdkReady(true); return; }
     const existing = document.getElementById('aps-viewer-js') as HTMLScriptElement | null;
@@ -119,7 +185,6 @@ export default function APSViewer4D({
   useEffect(() => {
     if (!sdkReady || !containerRef.current || viewerRef.current) return;
     let cancelled = false;
-
     const getAccessToken = async (cb: (t: string, e: number) => void) => {
       try {
         const r = await fetch('/api/aps/token');
@@ -127,7 +192,6 @@ export default function APSViewer4D({
         cb(access_token, expires_in);
       } catch (e) { console.error('[APS4D] token:', e); }
     };
-
     window.Autodesk.Viewing.Initializer(
       { env: 'AutodeskProduction', api: 'derivativeV2', getAccessToken },
       () => {
@@ -136,8 +200,6 @@ export default function APSViewer4D({
         viewer.start();
         viewer.setTheme('dark-theme');
         viewerRef.current = viewer;
-
-        // Selection → emit externalIds synchronously to prevent race conditions during rapid multi-select
         viewer.addEventListener(
           window.Autodesk.Viewing.SELECTION_CHANGED_EVENT,
           (ev: any) => {
@@ -147,36 +209,24 @@ export default function APSViewer4D({
             onSelectionChange?.(extIds);
           }
         );
-
-        // After geometry loads: build extId map then apply any pending colors
         viewer.addEventListener(
           window.Autodesk.Viewing.GEOMETRY_LOADED_EVENT,
           () => {
             viewer.model?.getExternalIdMapping((extMap: Record<string, number>) => {
               extIdToDbIdRef.current = extMap;
-              
-              // Build reverse map for rapid synchronous selection lookups
               const db2ext: Record<number, string> = {};
-              for (const [extId, dbId] of Object.entries(extMap)) {
-                db2ext[dbId] = extId;
-              }
+              for (const [extId, dbId] of Object.entries(extMap)) db2ext[dbId] = extId;
               dbIdToExtIdRef.current = db2ext;
-              
               modelLoadedRef.current = true;
-              // Apply pending 4D state now that the dbId map is ready
-              const colors    = elementColorsRef.current;
-              const done      = doneIdsRef.current;
+              const colors       = elementColorsRef.current;
+              const done         = doneIdsRef.current;
               const coloredDbIds = colors.map(({ externalId }) => extMap[externalId]).filter((id): id is number => id != null);
               const doneDbIds    = done.map(id => extMap[id]).filter((id): id is number => id != null);
               const isolateDbIds = [...coloredDbIds, ...doneDbIds];
               if (globalGreyRef.current) {
                 viewer.isolate(isolateDbIds.length > 0 ? isolateDbIds : [-1], viewer.model);
               } else {
-                if (isolateDbIds.length > 0) {
-                  viewer.isolate(isolateDbIds, viewer.model);
-                } else {
-                  viewer.isolate(undefined, viewer.model);
-                }
+                viewer.showAll();
               }
               viewer.clearThemingColors();
               for (const { externalId, hex, alpha } of colors) {
@@ -188,12 +238,10 @@ export default function APSViewer4D({
             }, () => {});
           }
         );
-
         setViewerReady(true);
         loadModel(viewer);
       }
     );
-
     return () => {
       cancelled = true;
       modelLoadedRef.current = false;
@@ -216,10 +264,7 @@ export default function APSViewer4D({
       setStatus(`Cargando ${name}…`);
       window.Autodesk.Viewing.Document.load(
         `urn:${urn}`,
-        (doc: any) => {
-          viewer.loadDocumentNode(doc, doc.getRoot().getDefaultGeometry());
-          setStatus('');
-        },
+        (doc: any) => { viewer.loadDocumentNode(doc, doc.getRoot().getDefaultGeometry()); setStatus(''); },
         (code: number, msg: string) => { setError(`Error (${code}): ${msg}`); setStatus(''); }
       );
     } catch (e: any) { setError(`Error: ${e.message}`); setStatus(''); }
@@ -234,8 +279,7 @@ export default function APSViewer4D({
             <>
               <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
               <span className="text-red-600 flex-1">{error}</span>
-              <button
-                onClick={() => { setError(''); viewerRef.current && loadModel(viewerRef.current); }}
+              <button onClick={() => { setError(''); viewerRef.current && loadModel(viewerRef.current); }}
                 className="flex items-center gap-1 text-slate-500 hover:text-slate-800 text-xs">
                 <RefreshCw className="w-3.5 h-3.5" /> Reintentar
               </button>
@@ -248,14 +292,12 @@ export default function APSViewer4D({
           )}
         </div>
       )}
-
       {!viewerReady && !error && (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-slate-900">
           <Loader2 className="w-10 h-10 animate-spin text-blue-400" />
           <span className="text-sm text-slate-300">{status}</span>
         </div>
       )}
-
       {modelName && !status && !error && (
         <div className="absolute bottom-4 left-4 z-10 flex items-center gap-2 px-3 py-1.5
           bg-black/50 backdrop-blur-sm rounded-full text-white text-[11px] font-medium pointer-events-none">
@@ -263,8 +305,9 @@ export default function APSViewer4D({
           {modelName}
         </div>
       )}
-
       <div ref={containerRef} className="w-full h-full" />
     </div>
   );
-}
+});
+
+export default APSViewer4D;
