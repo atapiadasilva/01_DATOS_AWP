@@ -40,7 +40,7 @@ export default function ViewerWBSLayout() {
 
   return (
     <div ref={containerRef}
-      className="flex flex-col w-full h-full overflow-hidden rounded-xl border border-slate-200 shadow-sm bg-slate-900">
+      className="flex flex-col w-full flex-1 min-h-0 overflow-hidden rounded-xl border border-slate-200 shadow-sm bg-slate-900">
 
       {/* ── 3D Viewer ───────────────────────────────────────────────────────── */}
       <div
@@ -67,7 +67,7 @@ export default function ViewerWBSLayout() {
       )}
 
       {/* ── WBS / Gantt panel ───────────────────────────────────────────────── */}
-      <div className={`flex flex-col overflow-hidden bg-white ${wbsMinimized ? '' : 'flex-1'}`}
+      <div className={`flex flex-col overflow-hidden bg-white min-h-0 ${wbsMinimized ? '' : 'flex-1'}`}
         style={wbsMinimized ? { height: 36 } : undefined}>
         <WBSGanttPanel
           modelUrn={modelUrn}

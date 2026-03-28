@@ -82,15 +82,41 @@ export default function APSViewer({ onSelectionChange, onModelUrnReady, highligh
   useEffect(() => { cwpColorsRef.current  = cwpColors;  }, [cwpColors]);
 
   useEffect(() => {
-    if (!highlightExternalIds?.length || !viewerRef.current) return;
+    if (!viewerRef.current) return;
+    const viewer = viewerRef.current;
+    
+    if (!highlightExternalIds?.length) {
+      viewer.showAll();
+      viewer.clearThemingColors();
+      viewer.select([]);
+      // Re-apply CWP colors if any (optional, but keep it clean)
+      applyColorsFromDB(viewer);
+      return;
+    }
+
     const dbIds = highlightExternalIds
       .map(id => extIdToDbIdRef.current[id])
       .filter((id): id is number => id != null);
+
     if (dbIds.length) {
-      viewerRef.current.select(dbIds);
-      viewerRef.current.fitToView(dbIds);
+      viewer.showAll(); // make sure everything is visible
+      viewer.select(dbIds);
+      viewer.fitToView(dbIds);
+      
+      // 1. Set EVERYTHING to a soft ghosted grey
+      // We can use the root node (usually 1 or the model) to theme all
+      viewer.setThemingColor(viewer.model.getRootId(), new window.THREE.Vector4(0.8, 0.8, 0.8, 0.2), viewer.model, true);
+      
+      // 2. Set SELECTED to their highlight color (e.g. Blue or their CWP color)
+      for (const dbId of dbIds) {
+        viewer.setThemingColor(dbId, new window.THREE.Vector4(0, 0.5, 1, 0.9), viewer.model, true);
+      }
+    } else {
+      viewer.showAll();
+      viewer.clearThemingColors();
+      applyColorsFromDB(viewer);
     }
-  }, [highlightExternalIds]);
+  }, [highlightExternalIds]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // helper: effective color for a CWP
   const getCwpColor = useCallback(

@@ -6,9 +6,21 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-function excelToIso(serial: number | null | undefined): string | null {
+function excelToIso(serial: any): string | null {
   if (!serial) return null;
-  return new Date(Math.round((serial - 25569) * 86400000)).toISOString().split('T')[0];
+  const n = Number(serial);
+  if (isNaN(n) || n <= 0) {
+    if (typeof serial === 'string' && serial.includes('.')) {
+        const parts = serial.match(/(\d{2})\.(\d{2})\.(\d{4})/);
+        if (parts) return `${parts[3]}-${parts[2]}-${parts[1]}`;
+    }
+    return null;
+  }
+  try {
+    return new Date(Math.round((n - 25569) * 86400000)).toISOString().split('T')[0];
+  } catch (e) {
+    return null;
+  }
 }
 
 function cmpEdt(a: string, b: string): number {
@@ -23,18 +35,36 @@ function cmpEdt(a: string, b: string): number {
 
 export async function GET(req: NextRequest) {
   const projectId = req.nextUrl.searchParams.get('projectId');
+  const debugLogs: string[] = [];
+  debugLogs.push(`Project ID: ${projectId}`);
 
-  let entQ = supabase.from('entities').select('id').eq('name', 'PROGRAMA DE OBRA ACTUALIZADO');
-  if (projectId) entQ = entQ.eq('project_id', projectId);
-  const { data: ents } = await entQ;
-  if (!ents?.length) return NextResponse.json([]);
+  let entQ = supabase.from('entities').select('id, project_id').eq('name', 'PROGRAMA DE OBRA ACTUALIZADO');
+  const { data: ents, error: entErr } = await entQ;
+  
+  if (entErr) {
+    return NextResponse.json({ error: entErr.message, debug: debugLogs }, { status: 500 });
+  }
+
+  debugLogs.push(`Found ${ents?.length ?? 0} entities by name`);
+
+  let targetEnt = ents?.find(e => e.project_id === projectId);
+  if (!targetEnt && ents?.length) {
+    debugLogs.push(`Fallback to first entity: ${ents[0].id} (Project: ${ents[0].project_id})`);
+    targetEnt = ents[0];
+  }
+
+  if (!targetEnt) {
+    return NextResponse.json({ debug: debugLogs, tasks: [] });
+  }
 
   const { data: records, error } = await supabase
     .from('data_records')
     .select('data')
-    .in('entity_id', ents.map((e: any) => e.id));
+    .eq('entity_id', targetEnt.id);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: error.message, debug: debugLogs }, { status: 500 });
+  
+  debugLogs.push(`Found ${records?.length ?? 0} records for entity ${targetEnt.id}`);
 
   const tasks = (records ?? []).map((r: any) => {
     const d = r.data as Record<string, any>;
@@ -56,8 +86,6 @@ export async function GET(req: NextRequest) {
 
   tasks.sort((a: any, b: any) => cmpEdt(a.edt, b.edt));
 
-  // mark hasChildren
-  const edts = new Set(tasks.map((t: any) => t.edt));
   const result = tasks.map((t: any) => ({
     ...t,
     hasChildren: tasks.some(
@@ -66,5 +94,8 @@ export async function GET(req: NextRequest) {
     ),
   }));
 
-  return NextResponse.json(result);
+  return NextResponse.json({
+    debug: debugLogs,
+    tasks: result
+  });
 }

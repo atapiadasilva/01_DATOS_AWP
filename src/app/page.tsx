@@ -41,7 +41,8 @@ import CWPReportEditor from '@/components/cwp/CWPReportEditor';
 import CWPMatcher from '@/components/mapping/CWPMatcher';
 import SourceOfTruth from '@/components/config/SourceOfTruth';
 import APSViewer from '@/components/viewer3d/APSViewer';
-import ViewerWBSLayout from '@/components/viewer3d/ViewerWBSLayout';
+import ViewerWBSLayout  from '@/components/viewer3d/ViewerWBSLayout';
+import Viewer4DLayout   from '@/components/viewer3d/Viewer4DLayout';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
@@ -1164,8 +1165,15 @@ export default function Home() {
 
           {/* ─── Visor 3D + Programa ─── */}
           {activeTab === 'viewer3d-wbs' && (
-            <div className="h-full p-4">
+            <div className="absolute inset-0 p-4 flex flex-col">
               <ViewerWBSLayout />
+            </div>
+          )}
+
+          {/* ─── 4D Simulación ─── */}
+          {activeTab === 'viewer4d' && (
+            <div className="absolute inset-0 p-4 flex flex-col">
+              <Viewer4DLayout />
             </div>
           )}
 

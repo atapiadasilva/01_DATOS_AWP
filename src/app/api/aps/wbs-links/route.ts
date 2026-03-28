@@ -19,7 +19,10 @@ export async function GET(req: NextRequest) {
     .eq('project_id', projectId)
     .eq('model_urn',  modelUrn);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error('[API/WBS-LINKS] GET Error:', error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
   return NextResponse.json(data);
 }
 
@@ -41,7 +44,10 @@ export async function POST(req: NextRequest) {
     .from('aps_wbs_links')
     .upsert(rows, { onConflict: 'project_id,model_urn,external_id' });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error('[API/WBS-LINKS] POST Error:', error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
   return NextResponse.json({ linked: rows.length });
 }
 
@@ -57,6 +63,9 @@ export async function DELETE(req: NextRequest) {
     .eq('model_urn',  modelUrn)
     .in('external_id', externalIds);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error('[API/WBS-LINKS] DELETE Error:', error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
   return NextResponse.json({ removed: externalIds.length });
 }

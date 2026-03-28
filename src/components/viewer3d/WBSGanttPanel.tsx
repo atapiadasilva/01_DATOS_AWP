@@ -88,19 +88,28 @@ export default function WBSGanttPanel({
     syncGuard.current = false;
   };
 
+  const [debugInfo, setDebugInfo] = useState<string[]>([]);
+
   // ── Load tasks ────────────────────────────────────────────────────────────
   useEffect(() => {
     const url = currentProject?.id ? `/api/aps/wbs?projectId=${currentProject.id}` : '/api/aps/wbs';
+    console.log('[WBS] Loading tasks from:', url);
     setLoading(true);
     fetch(url)
       .then(r => r.json())
-      .then((data: WBSTask[]) => {
-        if (!Array.isArray(data)) return;
-        setTasks(data);
+      .then((data: any) => {
+        console.log('[WBS] Data received:', data);
+        const taskList = Array.isArray(data) ? data : (data.tasks || []);
+        setTasks(taskList);
+        if (data.debug) setDebugInfo(data.debug);
+        
         // Default: collapse from level 3 down
         const c: Record<string, boolean> = {};
-        data.forEach(t => { if (t.hasChildren && t.level >= 3) c[t.edt] = true; });
+        taskList.forEach((t: WBSTask) => { if (t.hasChildren && t.level >= 3) c[t.edt] = true; });
         setCollapsed(c);
+      })
+      .catch(err => {
+        console.error('[WBS] Fetch error:', err);
       })
       .finally(() => setLoading(false));
   }, [currentProject?.id]);
@@ -235,7 +244,7 @@ export default function WBSGanttPanel({
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="flex flex-col h-full bg-white overflow-hidden">
+    <div className="flex flex-col flex-1 bg-white overflow-hidden min-h-0">
 
       {/* ── Toolbar ─────────────────────────────────────────────────────────── */}
       <div className="shrink-0 flex items-center gap-2 px-3 bg-slate-800 text-white"
@@ -304,233 +313,253 @@ export default function WBSGanttPanel({
               <Loader2 className="w-5 h-5 animate-spin" /> Cargando programa…
             </div>
           ) : (
-            <div className="flex flex-1 overflow-hidden">
-
-              {/* ── Left: task tree (fixed 440px, vertical scroll) ────────────── */}
-              <div className="flex flex-col shrink-0 border-r border-slate-200 bg-white"
-                style={{ width: 440 }}>
-
-                {/* Column headers */}
-                <div className="shrink-0 flex items-stretch bg-slate-700 text-slate-300
-                  text-[9px] font-black uppercase tracking-wider select-none border-b border-slate-600">
-                  <div className="flex items-center px-2 py-2 border-r border-slate-600"
-                    style={{ width: 110 }}>EDT</div>
-                  <div className="flex items-center flex-1 px-2 py-2 border-r border-slate-600">
-                    Nombre de Tarea
-                  </div>
-                  <div className="flex items-center justify-center px-1 py-2 border-r border-slate-600"
-                    style={{ width: 38 }}>%</div>
-                  <div className="flex items-center justify-center px-1 py-2"
-                    style={{ width: 44 }}>3D</div>
+            <div className="flex flex-1 overflow-hidden min-h-0">
+              {tasks.length === 0 ? (
+                <div className="flex-1 flex flex-col items-center justify-center p-12 text-center bg-white">
+                  <Calendar className="w-12 h-12 text-slate-100 mb-4" />
+                  <h3 className="text-lg font-black text-slate-400 uppercase italic">Sin Programa de Obra</h3>
+                  <p className="text-xs text-slate-400 max-w-xs mt-2 font-bold italic">
+                    No se encontraron registros para la entidad <br/>
+                    <span className="text-slate-500 uppercase">"PROGRAMA DE OBRA ACTUALIZADO"</span>
+                  </p>
+                  {debugInfo.length > 0 && (
+                    <div className="mt-4 p-2 bg-slate-50 border border-slate-200 rounded text-[9px] font-mono text-slate-500 text-left max-w-md overflow-x-auto">
+                      <div className="font-black mb-1 border-b border-slate-100 pb-1 uppercase tracking-tighter">Debug Status:</div>
+                      {debugInfo.map((line, i) => <div key={i}>• {line}</div>)}
+                    </div>
+                  )}
                 </div>
+              ) : (
+                <>
+                  {/* ── Left: task tree (fixed 440px, vertical scroll) ────────────── */}
+                  <div className="flex flex-col shrink-0 border-r border-slate-200 bg-white"
+                    style={{ width: 440 }}>
 
-                {/* Rows */}
-                <div ref={leftRef} className="flex-1 overflow-y-auto" onScroll={onLeftScroll}>
-                  {visibleTasks.map((task, idx) => {
-                    const isActive  = activeEdt === task.edt;
-                    const linkCount = (wbsLinks[task.edt] ?? []).length;
-                    const color     = taskColor(task.edt);
-
-                    return (
-                      <div
-                        key={task.edt}
-                        onClick={() => handleTaskClick(task)}
-                        style={{ height: ROW_H }}
-                        className={`flex items-center border-b cursor-pointer select-none transition-colors
-                          ${isActive
-                            ? 'bg-blue-50 border-blue-100'
-                            : idx % 2 === 0
-                              ? 'bg-white border-slate-50 hover:bg-slate-50'
-                              : 'bg-slate-50/50 border-slate-100 hover:bg-slate-100/60'}`}
-                      >
-                        {/* EDT + toggle */}
-                        <div className="shrink-0 flex items-center gap-0.5 border-r border-slate-100"
-                          style={{ width: 110, paddingLeft: 4 + task.level * 10 }}>
-                          {task.hasChildren ? (
-                            <button onClick={e => toggleCollapse(task.edt, e)}
-                              className="w-4 h-4 flex items-center justify-center shrink-0 text-slate-400 hover:text-slate-700">
-                              {collapsed[task.edt]
-                                ? <ChevronRight className="w-3 h-3" />
-                                : <ChevronDown  className="w-3 h-3" />}
-                            </button>
-                          ) : (
-                            <span className="w-4 shrink-0" />
-                          )}
-                          {/* Color dot */}
-                          <span className="w-2 h-2 rounded-sm shrink-0 mr-0.5"
-                            style={{ background: color, opacity: 0.8 }} />
-                          <span className={`text-[8.5px] font-mono truncate leading-none
-                            ${isActive ? 'text-blue-700 font-bold' : 'text-slate-400'}`}>
-                            {task.edt}
-                          </span>
-                        </div>
-
-                        {/* Task name */}
-                        <div className="flex-1 min-w-0 px-2 border-r border-slate-100">
-                          <span className={`block truncate leading-tight
-                            ${isActive
-                              ? 'text-[10.5px] font-bold text-blue-800'
-                              : task.level === 0
-                                ? 'text-[10.5px] font-extrabold text-slate-800'
-                                : task.level <= 2
-                                  ? 'text-[10px] font-semibold text-slate-700'
-                                  : 'text-[10px] font-normal text-slate-600'}`}>
-                            {task.name}
-                          </span>
-                        </div>
-
-                        {/* % */}
-                        <div className="shrink-0 flex flex-col items-center justify-center gap-0.5 px-1 border-r border-slate-100"
-                          style={{ width: 38 }}>
-                          <span className={`text-[9px] font-black leading-none
-                            ${task.progress === 100 ? 'text-green-600' : task.progress > 0 ? 'text-blue-600' : 'text-slate-300'}`}>
-                            {task.progress}%
-                          </span>
-                          {/* Mini progress track */}
-                          <div className="w-full h-1 rounded-full bg-slate-100 overflow-hidden" style={{ maxWidth: 28 }}>
-                            <div className="h-full rounded-full" style={{ width: `${task.progress}%`, background: color }} />
-                          </div>
-                        </div>
-
-                        {/* 3D link count */}
-                        <div className="shrink-0 flex items-center justify-center" style={{ width: 44 }}>
-                          {linkCount > 0 ? (
-                            <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full text-white"
-                              style={{ background: color }}>
-                              {linkCount}
-                            </span>
-                          ) : (
-                            <span className="w-1.5 h-1.5 rounded-full bg-slate-200" />
-                          )}
-                        </div>
+                    {/* Column headers */}
+                    <div className="shrink-0 flex items-stretch bg-slate-700 text-slate-300
+                      text-[9px] font-black uppercase tracking-wider select-none border-b border-slate-600">
+                      <div className="flex items-center px-2 py-2 border-r border-slate-600"
+                        style={{ width: 110 }}>EDT</div>
+                      <div className="flex items-center flex-1 px-2 py-2 border-r border-slate-600">
+                        Nombre de Tarea
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
+                      <div className="flex items-center justify-center px-1 py-2 border-r border-slate-600"
+                        style={{ width: 38 }}>%</div>
+                      <div className="flex items-center justify-center px-1 py-2"
+                        style={{ width: 44 }}>3D</div>
+                    </div>
 
-              {/* ── Right: Gantt timeline (scrollable both axes) ──────────────── */}
-              <div
-                ref={rightRef}
-                className="flex-1 overflow-auto"
-                onScroll={onRightScroll}
-              >
-                <div style={{ width: totalPx, position: 'relative', minHeight: '100%' }}>
+                    {/* Rows */}
+                    <div ref={leftRef} className="flex-1 overflow-y-auto" onScroll={onLeftScroll}>
+                      {visibleTasks.map((task, idx) => {
+                        const isActive  = activeEdt === task.edt;
+                        const linkCount = (wbsLinks[task.edt] ?? []).length;
+                        const color     = taskColor(task.edt);
 
-                  {/* Month header — sticky top, scrolls horizontally with content */}
-                  <div className="sticky top-0 z-20 bg-slate-700 border-b border-slate-600"
-                    style={{ height: 26 }}>
-                    {months.map(m => (
-                      <div key={m.label}
-                        style={{ position: 'absolute', left: m.leftPx, width: m.widthPx, top: 0, bottom: 0 }}
-                        className="flex items-center px-2 border-r border-slate-600">
-                        <span className="text-[9px] font-bold text-slate-300 uppercase tracking-wide whitespace-nowrap">
-                          {m.label}
-                        </span>
-                      </div>
-                    ))}
-                    {/* Today in header */}
-                    <div style={{ position: 'absolute', left: todayPx, top: 0, bottom: 0, width: 2 }}
-                      className="bg-red-400 z-30" />
-                  </div>
-
-                  {/* Gantt body */}
-                  <div style={{ paddingTop: 0 }}>
-                    {/* Alternating month backgrounds */}
-                    {months.filter(m => m.alt).map(m => (
-                      <div key={m.label}
-                        style={{
-                          position: 'absolute', left: m.leftPx, width: m.widthPx,
-                          top: 26, bottom: 0,
-                        }}
-                        className="bg-slate-50/70 pointer-events-none" />
-                    ))}
-
-                    {/* Month grid lines */}
-                    {months.map(m => (
-                      <div key={m.label}
-                        style={{ position: 'absolute', left: m.leftPx, top: 26, bottom: 0, width: 1 }}
-                        className="bg-slate-200 pointer-events-none" />
-                    ))}
-
-                    {/* Today vertical line */}
-                    <div style={{ position: 'absolute', left: todayPx, top: 26, bottom: 0, width: 2 }}
-                      className="bg-red-400/40 z-10 pointer-events-none" />
-
-                    {/* Task rows */}
-                    {visibleTasks.map((task, idx) => {
-                      const bar      = getBar(task);
-                      const color    = taskColor(task.edt);
-                      const isActive = activeEdt === task.edt;
-                      const barH     = task.level === 0 ? 14 : task.level <= 2 ? 12 : 10;
-
-                      return (
-                        <div
-                          key={task.edt}
-                          style={{ height: ROW_H, position: 'relative' }}
-                          onClick={() => handleTaskClick(task)}
-                          className={`border-b cursor-pointer transition-colors
-                            ${isActive
-                              ? 'bg-blue-50/50 border-blue-100'
-                              : idx % 2 === 0
-                                ? 'border-slate-50'
-                                : 'bg-slate-50/30 border-slate-100'}`}
-                        >
-                          {bar && (
-                            <>
-                              {/* Background track (full task duration, faint) */}
-                              <div style={{
-                                position:  'absolute',
-                                left:      bar.lx,
-                                width:     bar.wx,
-                                height:    barH,
-                                top:       '50%',
-                                transform: 'translateY(-50%)',
-                                background: color + '22',
-                                border:    `1px solid ${color}44`,
-                                borderRadius: 3,
-                              }} />
-
-                              {/* Progress fill */}
-                              <div style={{
-                                position:  'absolute',
-                                left:      bar.lx,
-                                width:     Math.round(bar.wx * task.progress / 100),
-                                height:    barH,
-                                top:       '50%',
-                                transform: 'translateY(-50%)',
-                                background: color,
-                                borderRadius: 3,
-                                opacity:   0.82,
-                              }} />
-
-                              {/* % label (only if bar is wide enough) */}
-                              {bar.wx > 32 && task.progress > 0 && (
-                                <div style={{
-                                  position:  'absolute',
-                                  left:      bar.lx + 3,
-                                  top:       '50%',
-                                  transform: 'translateY(-50%)',
-                                  fontSize:  9,
-                                  color:     '#fff',
-                                  fontWeight: 900,
-                                  lineHeight: 1,
-                                  zIndex:    2,
-                                  pointerEvents: 'none',
-                                  textShadow: '0 1px 2px rgba(0,0,0,0.4)',
-                                }}>
-                                  {task.progress}%
-                                </div>
+                        return (
+                          <div
+                            key={task.edt}
+                            onClick={() => handleTaskClick(task)}
+                            style={{ height: ROW_H }}
+                            className={`flex items-center border-b cursor-pointer select-none transition-colors
+                              ${isActive
+                                ? 'bg-blue-50 border-blue-100'
+                                : idx % 2 === 0
+                                  ? 'bg-white border-slate-50 hover:bg-slate-50'
+                                  : 'bg-slate-50/50 border-slate-100 hover:bg-slate-100/60'}`}
+                          >
+                            {/* EDT + toggle */}
+                            <div className="shrink-0 flex items-center gap-0.5 border-r border-slate-100"
+                              style={{ width: 110, paddingLeft: 4 + task.level * 10 }}>
+                              {task.hasChildren ? (
+                                <button onClick={e => toggleCollapse(task.edt, e)}
+                                  className="w-4 h-4 flex items-center justify-center shrink-0 text-slate-400 hover:text-slate-700">
+                                  {collapsed[task.edt]
+                                    ? <ChevronRight className="w-3 h-3" />
+                                    : <ChevronDown  className="w-3 h-3" />}
+                                </button>
+                              ) : (
+                                <span className="w-4 shrink-0" />
                               )}
-                            </>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
+                              {/* Color dot */}
+                              <span className="w-2 h-2 rounded-sm shrink-0 mr-0.5"
+                                style={{ background: color, opacity: 0.8 }} />
+                              <span className={`text-[8.5px] font-mono truncate leading-none
+                                ${isActive ? 'text-blue-700 font-bold' : 'text-slate-400'}`}>
+                                {task.edt}
+                              </span>
+                            </div>
 
+                            {/* Task name */}
+                            <div className="flex-1 min-w-0 px-2 border-r border-slate-100">
+                              <span className={`block truncate leading-tight
+                                ${isActive
+                                  ? 'text-[10.5px] font-bold text-blue-800'
+                                  : task.level === 0
+                                    ? 'text-[10.5px] font-extrabold text-slate-800'
+                                    : task.level <= 2
+                                      ? 'text-[10px] font-semibold text-slate-700'
+                                      : 'text-[10px] font-normal text-slate-600'}`}>
+                                {task.name}
+                              </span>
+                            </div>
+
+                            {/* % */}
+                            <div className="shrink-0 flex flex-col items-center justify-center gap-0.5 px-1 border-r border-slate-100"
+                              style={{ width: 38 }}>
+                              <span className={`text-[9px] font-black leading-none
+                                ${task.progress === 100 ? 'text-green-600' : task.progress > 0 ? 'text-blue-600' : 'text-slate-300'}`}>
+                                {task.progress}%
+                              </span>
+                              {/* Mini progress track */}
+                              <div className="w-full h-1 rounded-full bg-slate-100 overflow-hidden" style={{ maxWidth: 28 }}>
+                                <div className="h-full rounded-full" style={{ width: `${task.progress}%`, background: color }} />
+                              </div>
+                            </div>
+
+                            {/* 3D link count */}
+                            <div className="shrink-0 flex items-center justify-center" style={{ width: 44 }}>
+                              {linkCount > 0 ? (
+                                <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full text-white"
+                                  style={{ background: color }}>
+                                  {linkCount}
+                                </span>
+                              ) : (
+                                <span className="w-1.5 h-1.5 rounded-full bg-slate-200" />
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* ── Right: Gantt timeline (scrollable both axes) ──────────────── */}
+                  <div
+                    ref={rightRef}
+                    className="flex-1 overflow-auto"
+                    onScroll={onRightScroll}
+                  >
+                    <div style={{ width: totalPx, position: 'relative', minHeight: '100%' }}>
+
+                      {/* Month header — sticky top, scrolls horizontally with content */}
+                      <div className="sticky top-0 z-20 bg-slate-700 border-b border-slate-600"
+                        style={{ height: 26 }}>
+                        {months.map(m => (
+                          <div key={m.label}
+                            style={{ position: 'absolute', left: m.leftPx, width: m.widthPx, top: 0, bottom: 0 }}
+                            className="flex items-center px-2 border-r border-slate-600">
+                            <span className="text-[9px] font-bold text-slate-300 uppercase tracking-wide whitespace-nowrap">
+                              {m.label}
+                            </span>
+                          </div>
+                        ))}
+                        {/* Today in header */}
+                        <div style={{ position: 'absolute', left: todayPx, top: 0, bottom: 0, width: 2 }}
+                          className="bg-red-400 z-30" />
+                      </div>
+
+                      {/* Gantt body */}
+                      <div style={{ paddingTop: 0 }}>
+                        {/* Alternating month backgrounds */}
+                        {months.filter(m => m.alt).map(m => (
+                          <div key={m.label}
+                            style={{
+                              position:  'absolute',
+                              left:      m.leftPx,
+                              width:     m.widthPx,
+                              top:       26,
+                              bottom:    0,
+                            }}
+                            className="bg-slate-50/70 pointer-events-none" />
+                        ))}
+
+                        {/* Month grid lines */}
+                        {months.map(m => (
+                          <div key={m.label}
+                            style={{ position: 'absolute', left: m.leftPx, top: 26, bottom: 0, width: 1 }}
+                            className="bg-slate-200 pointer-events-none" />
+                        ))}
+
+                        {/* Today vertical line */}
+                        <div style={{ position: 'absolute', left: todayPx, top: 26, bottom: 0, width: 2 }}
+                          className="bg-red-400/40 z-10 pointer-events-none" />
+
+                        {/* Task rows */}
+                        {visibleTasks.map((task, idx) => {
+                          const bar      = getBar(task);
+                          const color    = taskColor(task.edt);
+                          const isActive = activeEdt === task.edt;
+                          const barH     = task.level === 0 ? 14 : task.level <= 2 ? 12 : 10;
+
+                          return (
+                            <div
+                              key={task.edt}
+                              style={{ height: ROW_H, position: 'relative' }}
+                              onClick={() => handleTaskClick(task)}
+                              className={`border-b cursor-pointer transition-colors
+                                ${isActive
+                                  ? 'bg-blue-50/50 border-blue-100'
+                                  : idx % 2 === 0
+                                    ? 'border-slate-50'
+                                    : 'bg-slate-50/30 border-slate-100'}`}
+                            >
+                              {bar && (
+                                <>
+                                  {/* Background track (full task duration, faint) */}
+                                  <div style={{
+                                    position:  'absolute',
+                                    left:      bar.lx,
+                                    width:     bar.wx,
+                                    height:    barH,
+                                    top:       '50%',
+                                    transform: 'translateY(-50%)',
+                                    background: color + '22',
+                                    border:    `1px solid ${color}44`,
+                                    borderRadius: 3,
+                                  }} />
+
+                                  {/* Progress fill */}
+                                  <div style={{
+                                    position:  'absolute',
+                                    left:      bar.lx,
+                                    width:     Math.round(bar.wx * task.progress / 100),
+                                    height:    barH,
+                                    top:       '50%',
+                                    transform: 'translateY(-50%)',
+                                    background: color,
+                                    borderRadius: 3,
+                                    opacity:   0.82,
+                                  }} />
+
+                                  {/* % label (only if bar is wide enough) */}
+                                  {bar.wx > 32 && task.progress > 0 && (
+                                    <div style={{
+                                      position:  'absolute',
+                                      left:      bar.lx + 3,
+                                      top:       '50%',
+                                      transform: 'translateY(-50%)',
+                                      fontSize:  9,
+                                      color:     '#fff',
+                                      fontWeight: 900,
+                                      lineHeight: 1,
+                                      zIndex:    2,
+                                      pointerEvents: 'none',
+                                      textShadow: '0 1px 2px rgba(0,0,0,0.4)',
+                                    }}>
+                                      {task.progress}%
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           )}
         </>
