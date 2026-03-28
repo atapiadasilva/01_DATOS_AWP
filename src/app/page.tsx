@@ -40,6 +40,7 @@ import CWPPhotoGallery from '@/components/cwp/CWPPhotoGallery';
 import CWPReportEditor from '@/components/cwp/CWPReportEditor';
 import CWPMatcher from '@/components/mapping/CWPMatcher';
 import SourceOfTruth from '@/components/config/SourceOfTruth';
+import APSViewer from '@/components/viewer3d/APSViewer';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
@@ -1150,6 +1151,13 @@ export default function Home() {
           {activeTab === 'platform-admin' && (
             <div className="overflow-y-auto">
               <PlatformAdmin />
+            </div>
+          )}
+
+          {/* ─── Visor 3D APS ─── */}
+          {activeTab === 'viewer3d' && (
+            <div className="h-full p-4">
+              <APSViewer />
             </div>
           )}
 

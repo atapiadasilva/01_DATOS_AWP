@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import {
   Star, Briefcase, Users, FileText, Calendar,
   FolderGit2, ChevronDown, ChevronRight, Activity,
-  Network, CheckSquare, Search, GitMerge, ShoppingCart, LayoutGrid, Grid3x3, Settings, Crown, Link2, ShieldCheck, BarChart3, Shield
+  Network, CheckSquare, Search, GitMerge, ShoppingCart, LayoutGrid, Grid3x3, Settings, Crown, Link2, ShieldCheck, BarChart3, Shield, Box
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
@@ -127,7 +127,8 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
         </NavSection>
 
         <NavSection id="ingenieria" label="Ingeniería" icon={FolderGit2}>
-          <NavItem id="drawing-log" label="Log de Planos" icon={FileText} />
+          <NavItem id="drawing-log" label="Log de Planos"   icon={FileText} />
+          <NavItem id="viewer3d"    label="Visor 3D / BIM"  icon={Box} />
         </NavSection>
 
         <NavSection id="procura" label="Suministros & Procura" icon={ShoppingCart}>
