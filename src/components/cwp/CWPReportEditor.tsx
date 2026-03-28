@@ -1,13 +1,14 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   X, Printer, Type, AlignLeft, AlignCenter, AlignRight,
   Image as ImageIcon, Minus, ChevronUp, ChevronDown,
   Trash2, BarChart3, Table2, FileText, Maximize2, Bold,
-  Italic, Wand2, Loader2, RefreshCw, Eye, Download
+  Italic, Wand2, Loader2, RefreshCw, Eye, Download, Settings
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { detectCwpColumn } from '@/lib/cwp-utils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type SectionType = 'header' | 'text' | 'image' | 'divider' | 'metrics' | 'spacer' | 'twoCol' | 'viewtable' | 'activitytable' | 'photosummary' | 'pagebreak';
@@ -35,6 +36,9 @@ interface CWPReportEditorProps {
   cwp: any;
   hhData?: { totalHH: number; doneHH: number; pct: number; tasks: any[] } | null;
   customViews?: any[];
+  manualViewIds?: string[];
+  onAddManualView?: (id: string) => void;
+  onManageViews?: () => void;
   onClose: () => void;
 }
 
@@ -60,44 +64,79 @@ const SECTION_PRESETS: { type: SectionType; icon: any; label: string }[] = [
 ];
 
 // ─── ViewTable sub-component ──────────────────────────────────────────────────
-function ViewTableBlock({ section, cwpName, onUpdate, isEditing }: {
+function ViewTableBlock({ section, cwpName, onUpdate, isEditing, customViews }: {
   section: Section; cwpName: string;
   onUpdate: (updates: Partial<Section>) => void;
   isEditing: boolean;
+  customViews: any[];
 }) {
   const [rows, setRows] = useState<any[]>([]);
-  const [cols, setCols] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
 
+  const viewData = useMemo(() => 
+    customViews.find(v => v.id === section.viewId), 
+    [section.viewId, customViews]
+  );
+
+  const cols = useMemo(() => viewData?.columns || [], [viewData]);
+
   useEffect(() => {
-    if (!section.viewId) return;
+    if (!section.viewId || !viewData) return;
     loadData();
-  }, [section.viewId, cwpName]);
+  }, [section.viewId, cwpName, viewData, section.maxRows]);
 
   const loadData = async () => {
-    if (!section.viewId) return;
+    if (!viewData) return;
     setLoading(true);
     try {
-      const { data: viewData } = await supabase
-        .from('custom_views').select('*').eq('id', section.viewId).single();
-      if (!viewData) return;
-
       let query = supabase.from('data_records').select('*').eq('entity_id', viewData.entity_id);
       const val = cwpName.replace(/[()]/g, '').trim();
-      if (val && viewData.filter_key) {
-        query = query.filter(`data->>${viewData.filter_key}`, 'ilike', `%${val}%`);
+      
+      const filterKey = viewData.filter_key || detectCwpColumn(cols);
+
+      if (val && filterKey) {
+        query = query.filter(`data->>${filterKey}`, 'ilike', `%${val}%`);
       }
-      const { data: records } = await query.limit(section.maxRows || 20);
-      if (records && records.length > 0) {
-        const dataRows = records.map(r => r.data || {});
-        const allCols = viewData.columns || Object.keys(dataRows[0]).slice(0, 8);
-        setCols(allCols);
-        setRows(dataRows);
-      } else {
-        setRows([]); setCols([]);
+
+      const { data: records, error: recError } = await query.limit(section.maxRows || 20);
+      if (recError) throw recError;
+
+      let processedRows = (records || []).map(r => r.data || {});
+
+      // Relational Join Logic
+      if (viewData.definition && viewData.definition.selectedExtraColumns?.length > 0) {
+        const { selectedExtraColumns, reachableEntities } = viewData.definition;
+        const entityIdsToFetch = Array.from(new Set(selectedExtraColumns.map((c: any) => c.entityId))) as string[];
+        
+        const relatedDataMap: Record<string, any[]> = {};
+        await Promise.all(entityIdsToFetch.map(async (eid: string) => {
+          const { data: dr } = await supabase.from('data_records').select('id, data').eq('entity_id', eid);
+          if (dr) relatedDataMap[eid] = dr.map(r => ({ __id: r.id, ...r.data }));
+        }));
+
+        processedRows = processedRows.map(rowData => {
+          const joined = { ...rowData };
+          selectedExtraColumns.forEach((extra: any) => {
+            const re = (reachableEntities || []).find((r: any) => r.id === extra.entityId);
+            if (re && re.joinKey) {
+              const { parentCol, childCol } = re.joinKey;
+              const joinValue = joined[parentCol];
+              const match = (relatedDataMap[extra.entityId] || []).find(r => String(r[childCol]) === String(joinValue));
+              if (match) {
+                joined[`JOIN::${extra.entityId}::${extra.column}`] = match[extra.column];
+              }
+            }
+          });
+          return joined;
+        });
       }
-    } catch (e) { console.error(e); }
-    finally { setLoading(false); }
+
+      setRows(processedRows);
+    } catch (e) {
+      console.error('Error loading report view data:', e);
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (!section.viewId) {
@@ -124,12 +163,15 @@ function ViewTableBlock({ section, cwpName, onUpdate, isEditing }: {
         <div className="overflow-x-auto rounded-xl border border-brand-cloud">
           <table className="w-full text-left border-collapse">
             <thead className="bg-brand-deep text-white">
-              <tr>{cols.map(c => <th key={c} className="px-3 py-2 text-[8px] font-black uppercase tracking-widest">{c}</th>)}</tr>
+              <tr>{cols.map((c: string) => {
+                const displayCol = c.startsWith('JOIN::') ? c.split('::')[2] : c;
+                return <th key={c} className="px-3 py-2 text-[8px] font-black uppercase tracking-widest">{displayCol}</th>;
+              })}</tr>
             </thead>
             <tbody className="divide-y divide-brand-cloud">
               {rows.map((row, i) => (
                 <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-brand-cloud/20'}>
-                  {cols.map(c => (
+                  {cols.map((c: string) => (
                     <td key={c} className="px-3 py-2 text-[9px] text-slate-600 max-w-[120px]">
                       <span className="truncate block">{row[c] ?? '—'}</span>
                     </td>
@@ -197,7 +239,9 @@ function PhotoSummaryBlock({ cwpName }: { cwpName: string }) {
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export default function CWPReportEditor({ cwp, hhData, customViews = [], onClose }: CWPReportEditorProps) {
+export default function CWPReportEditor({ 
+  cwp, hhData, customViews = [], manualViewIds = [], onAddManualView, onManageViews, onClose 
+}: CWPReportEditorProps) {
   const [layout, setLayout]           = useState<'portrait' | 'landscape'>('portrait');
   const [editingId, setEditingId]     = useState<string | null>(null);
   const [sections, setSections]       = useState<Section[]>([]);
@@ -205,8 +249,12 @@ export default function CWPReportEditor({ cwp, hhData, customViews = [], onClose
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const fileInputRef                  = useRef<HTMLInputElement>(null);
 
-  // cwpViews = only views with filter_key
-  const cwpViews = customViews.filter(v => v.filter_key);
+  // cwpViews = any view with a CWP-related column OR manually linked
+  const cwpViews = customViews.filter(v => 
+    v.filter_key || 
+    (v.columns && detectCwpColumn(v.columns)) ||
+    manualViewIds.includes(v.id)
+  );
 
   // ── Initialize with defaults ──
   useEffect(() => {
@@ -491,7 +539,7 @@ export default function CWPReportEditor({ cwp, hhData, customViews = [], onClose
 
       // ─ View table ─
       case 'viewtable': return (
-        <ViewTableBlock section={s} cwpName={cwp.name} onUpdate={u => updateSection(s.id, u)} isEditing={isEditing} />
+        <ViewTableBlock section={s} cwpName={cwp.name} onUpdate={u => updateSection(s.id, u)} isEditing={isEditing} customViews={customViews} />
       );
 
       // ─ Photo summary ─
@@ -675,7 +723,34 @@ export default function CWPReportEditor({ cwp, hhData, customViews = [], onClose
                     </button>
                   ))
                 )}
-                <div>
+                <div className="mt-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Vincular otra</p>
+                    <select 
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        if (id && onAddManualView) onAddManualView(id);
+                        e.target.value = '';
+                      }}
+                      className="text-[9px] font-black bg-brand-cloud/40 border border-brand-cloud rounded-lg px-2 py-1 outline-none focus:border-brand-electric max-w-[90px]"
+                    >
+                      <option value="">+ Seleccionar</option>
+                      {customViews
+                        .filter(v => !cwpViews.some(cv => cv.id === v.id))
+                        .map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                    </select>
+                  </div>
+
+                  <button 
+                    onClick={onManageViews}
+                    className="w-full flex items-center justify-center gap-2 py-2 border-2 border-dashed border-brand-cloud rounded-xl text-brand-slate/40 text-[9px] font-black uppercase hover:border-brand-electric hover:text-brand-electric transition-all"
+                  >
+                    <Settings size={12} />
+                    Gestionar Vistas
+                  </button>
+                </div>
+
+                <div className="mt-4">
                   <label className="text-[8px] font-black text-slate-300 uppercase tracking-widest block mb-1">Máx. filas</label>
                   <input type="number" value={editingSec.maxRows || 20}
                     onChange={e => updateSection(editingId!, { maxRows: parseInt(e.target.value) || 20 })}

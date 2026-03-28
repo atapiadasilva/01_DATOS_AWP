@@ -43,6 +43,7 @@ import SourceOfTruth from '@/components/config/SourceOfTruth';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
+import { detectCwpColumn } from '@/lib/cwp-utils';
 
 // ─── Discipline color system ──────────────────────────────────────────────────
 const DISC_COLORS: Record<string, { bg: string; text: string; border: string; accent: string }> = {
@@ -120,25 +121,66 @@ const EmbeddedView = ({ viewName, filterValue, customViews, title, entities = []
     if (!view?.entity_id) { setLoading(false); return; }
     try {
       setLoading(true);
+      
+      // 1. Fetch base data
       let query = supabase.from('data_records').select('*').eq('entity_id', view.entity_id);
       const val = String(filterValue || '').replace(/[()]/g, '').trim();
+      
+      const actualColumns = view.columns || [];
+      const filterKey = view.filter_key || detectCwpColumn(actualColumns);
+      
       if (val) {
-        const visibleKey = [view.filter_key, 'CWP', 'PACKAGE', 'PAQUETE', 'WBS', 'EDT', 'PLANO', 'DRAWING']
-          .filter(Boolean).find(k => (view.columns || []).some((col: string) => col.toUpperCase().trim() === k.toUpperCase().trim()));
-        if (visibleKey) {
-          const exactKey = (view.columns || []).find((col: string) => col.toUpperCase().trim() === visibleKey.toUpperCase().trim());
-          query = query.filter(`data->>${exactKey}`, 'ilike', `%${val}%`);
+        if (filterKey) {
+          query = query.filter(`data->>${filterKey}`, 'ilike', `%${val}%`);
         } else {
-          const filters = [view.filter_key, 'CWP', 'PACKAGE', 'PAQUETE', 'WBS', 'EDT', 'PLANO', 'DRAWING']
-            .filter(Boolean).map(k => `data->>${k}.ilike.*${val}*`).join(',');
+          const keywords = ['CWP', 'PACKAGE', 'PAQUETE', 'WBS', 'EDT', 'PLANO', 'DRAWING'];
+          const filters = keywords.map(k => `data->>${k}.ilike.*${val}*`).join(',');
           query = query.or(filters);
         }
       }
+
       const { data: resultData, error } = await query.limit(isCompact ? 5 : 500);
-      if (!error && resultData) {
-        setData(resultData.map((r: any) => r.data ? { id: r.id, data: r.data } : { id: r.id, data: r }));
+      if (error) throw error;
+
+      let processedRows = (resultData || []).map((r: any) => ({ 
+        id: r.id, 
+        data: r.data || r 
+      }));
+
+      // 2. Relational Join Logic
+      if (view.definition && view.definition.selectedExtraColumns?.length > 0) {
+        const { selectedExtraColumns, reachableEntities } = view.definition;
+        const entityIdsToFetch = Array.from(new Set(selectedExtraColumns.map((c: any) => c.entityId)));
+        
+        const relatedDataMap: Record<string, any[]> = {};
+        await Promise.all(entityIdsToFetch.map(async (eid: any) => {
+          const { data: dr } = await supabase.from('data_records').select('id, data').eq('entity_id', eid);
+          if (dr) relatedDataMap[eid] = dr.map(r => ({ __id: r.id, ...r.data }));
+        }));
+
+        processedRows = processedRows.map(baseRow => {
+          const joinedData = { ...baseRow.data };
+          selectedExtraColumns.forEach((extra: any) => {
+            const re = (reachableEntities || []).find((r: any) => r.id === extra.entityId);
+            if (re && re.joinKey) {
+              const { parentCol, childCol } = re.joinKey;
+              const joinValue = joinedData[parentCol];
+              const match = (relatedDataMap[extra.entityId] || []).find(r => String(r[childCol]) === String(joinValue));
+              if (match) {
+                joinedData[`JOIN::${extra.entityId}::${extra.column}`] = match[extra.column];
+              }
+            }
+          });
+          return { ...baseRow, data: joinedData };
+        });
       }
-    } catch (err) { console.error(err); } finally { setLoading(false); }
+
+      setData(processedRows);
+    } catch (err) {
+      console.error('Error loading view data:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   React.useEffect(() => { loadViewData(); }, [view, filterValue]);
@@ -208,7 +250,10 @@ const EmbeddedView = ({ viewName, filterValue, customViews, title, entities = []
       <div className={`overflow-x-auto ${isCompact ? 'rounded-xl border border-slate-50' : 'rounded-[2rem] border border-slate-100 bg-white shadow-sm'} overflow-hidden`}>
         <table className="w-full text-left border-collapse">
           <thead className="bg-slate-50/50">
-            <tr>{(view.columns || []).map((col: string) => <th key={col} className="px-5 py-3.5 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">{col}</th>)}</tr>
+            <tr>{(view.columns || []).map((col: string) => {
+              const displayCol = col.startsWith('JOIN::') ? col.split('::')[2] : col;
+              return <th key={col} className="px-5 py-3.5 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">{displayCol}</th>;
+            })}</tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
             {loading ? <tr><td colSpan={100} className="py-16 text-center text-slate-400 text-[10px] italic"><Loader2 className="animate-spin inline mr-2" size={14} />Cargando...</td></tr>
@@ -495,8 +540,51 @@ export default function Home() {
     loadDashboardData();
   }, [dashboardEntityId, activeTab, cwpDisciplineMap]);
 
-  // ─── Vistas globales (todas las vistas con filter_key activo) ────────
-  const getCwpViews = () => customViews.filter(v => v.filter_key);
+  // ─── Vinculaciones de vistas persistentes ──────────────────────────
+  const { data: manualViewIds = [], refetch: refetchViewLinks } = useQuery({
+    queryKey: ['cwpViewLinks', projectId, selectedCWP?.name],
+    queryFn: async () => {
+      if (!projectId || !selectedCWP?.name) return [];
+      const { data, error } = await supabase
+        .from('cwp_view_links')
+        .select('view_id')
+        .eq('project_id', projectId)
+        .eq('cwp_code', selectedCWP.name);
+      if (error) throw error;
+      return data.map(d => d.view_id);
+    },
+    enabled: !!projectId && !!selectedCWP?.name
+  });
+
+  const handleLinkView = async (viewId: string) => {
+    if (!projectId || !selectedCWP?.name) return;
+    const { error } = await supabase.from('cwp_view_links').insert({
+      project_id: projectId,
+      cwp_code: selectedCWP.name,
+      view_id: viewId
+    });
+    if (!error) refetchViewLinks();
+  };
+
+  const handleUnlinkView = async (viewId: string) => {
+    if (!projectId || !selectedCWP?.name) return;
+    const { error } = await supabase.from('cwp_view_links')
+      .delete()
+      .eq('project_id', projectId)
+      .eq('cwp_code', selectedCWP.name)
+      .eq('view_id', viewId);
+    if (!error) refetchViewLinks();
+  };
+
+  // ─── Vistas globales (todas las vistas con filter_key activo o detectable + manuales) ──
+  const getCwpViews = () => {
+    const auto = customViews.filter(v => v.filter_key || (v.columns && detectCwpColumn(v.columns || [])));
+    const manual = customViews.filter(v => manualViewIds.includes(v.id));
+    // Combinar sin duplicados
+    const combined = [...auto];
+    manual.forEach(mv => { if (!combined.some(v => v.id === mv.id)) combined.push(mv); });
+    return combined;
+  };
 
   // ─── Modal confirmación de relación ──────────────────────────────────
   const confirmRelationship = async () => {
@@ -1244,16 +1332,52 @@ export default function Home() {
               </div>
 
               {/* Lista de vistas activas (acceso rápido) */}
-              {getCwpViews().length > 0 && (
-                <div className="bg-white rounded-[2rem] border border-slate-100 p-5 space-y-2">
+              <div className="bg-white rounded-[2rem] border border-slate-100 p-5 space-y-3">
+                <div className="flex items-center justify-between">
                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Módulos activos</p>
-                  {getCwpViews().map(view => (
-                    <div key={view.id} className="flex items-center py-1">
-                      <span className="text-[10px] font-black text-slate-700 truncate">{view.name}</span>
-                    </div>
-                  ))}
+                  <div className="flex gap-2">
+                    <select 
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        if (id) handleLinkView(id);
+                        e.target.value = '';
+                      }}
+                      className="text-[9px] font-black bg-slate-50 border border-slate-100 rounded-lg px-2 py-1 outline-none focus:border-brand-electric max-w-[80px]"
+                    >
+                      <option value="">+ Vincular</option>
+                      {customViews
+                        .filter(v => !getCwpViews().some(cv => cv.id === v.id))
+                        .map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                    </select>
+                    <button 
+                      onClick={() => setActiveTab('views')}
+                      className="p-1.5 bg-slate-100 text-slate-400 rounded-lg hover:bg-slate-900 hover:text-white transition-all shadow-sm"
+                      title="Nueva Vista"
+                    >
+                      <Plus size={10} />
+                    </button>
+                  </div>
                 </div>
-              )}
+                {getCwpViews().length === 0 ? (
+                  <p className="text-[9px] text-slate-300 font-bold italic">Sin vistas vinculadas</p>
+                ) : (
+                  <div className="space-y-1">
+                    {getCwpViews().map(view => (
+                      <div key={view.id} className="flex items-center justify-between py-1 group/item">
+                        <span className="text-[10px] font-black text-slate-700 truncate">{view.name}</span>
+                        {manualViewIds.includes(view.id) && (
+                          <button 
+                            onClick={() => handleUnlinkView(view.id)}
+                            className="opacity-0 group-hover/item:opacity-100 text-red-300 hover:text-red-500 transition-opacity"
+                          >
+                            <X size={10} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Área principal: tabbed content */}
@@ -1418,6 +1542,9 @@ export default function Home() {
           cwp={selectedCWP}
           hhData={(() => { const d = getCwpHHData(selectedCWP.name); return d && d.totalHH > 0 ? d : null; })()}
           customViews={customViews}
+          manualViewIds={manualViewIds}
+          onAddManualView={handleLinkView}
+          onManageViews={() => { setShowReportEditor(false); setActiveTab('views'); }}
           onClose={() => setShowReportEditor(false)}
         />
       )}

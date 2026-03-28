@@ -40,9 +40,6 @@ export default function RelationalExplorer({ entities, relationships, onRefresh 
   const [isSavingView, setIsSavingView] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
-  // ─── CWP column detection ────────────────────────────────────────────
-  const { cwpColumn, cwpValues } = useCwpFilter(selectedBaseColumns, baseData);
-
   // ─── Carga paginada ──────────────────────────────────────────────────
   const fetchAllRecords = async (entityId: string) => {
     let allRecords: any[] = [];
@@ -181,6 +178,12 @@ export default function RelationalExplorer({ entities, relationships, onRefresh 
     });
   }, [baseData, selectedExtraColumns, relatedEntityData, reachableEntities]);
 
+  // ─── CWP column detection ────────────────────────────────────────────
+  const { cwpColumn, cwpValues } = useCwpFilter(
+    useMemo(() => [...selectedBaseColumns, ...selectedExtraColumns.map(c => c.column)], [selectedBaseColumns, selectedExtraColumns]),
+    joinedRows
+  );
+
   // ─── Filtrado sobre resultados ───────────────────────────────────────
   const filteredJoinedRows = useMemo(() => {
     const allCols = [
@@ -215,8 +218,18 @@ export default function RelationalExplorer({ entities, relationships, onRefresh 
       const { error } = await supabase.from('custom_views').insert({
         name: saveViewName.trim(),
         entity_id: baseEntityId,
-        columns: selectedBaseColumns,
-        filter_key: detectedFilterKey || null
+        columns: [...selectedBaseColumns, ...selectedExtraColumns.map(c => `JOIN::${c.entityId}::${c.column}`)],
+        filter_key: detectedFilterKey || null,
+        definition: {
+          baseEntityId,
+          selectedBaseColumns,
+          selectedExtraColumns,
+          reachableEntities: reachableEntities.map(re => ({
+            id: re.entity.id,
+            name: re.entity.name,
+            joinKey: re.joinKey
+          }))
+        }
       });
 
       if (!error) {

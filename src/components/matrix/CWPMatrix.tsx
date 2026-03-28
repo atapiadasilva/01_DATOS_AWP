@@ -5,6 +5,7 @@ import {
   Loader2, Search, X, RefreshCw, Download, ArrowUpDown, ArrowDown, ArrowUp, Grid3X3
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { detectCwpColumn } from '@/lib/cwp-utils';
 import * as XLSX from 'xlsx';
 
 interface CWPMatrixProps {
@@ -77,9 +78,9 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
   const [sortView, setSortView]   = useState<string | null>(null);
   const [sortDir, setSortDir]     = useState<'asc' | 'desc'>('desc');
 
-  // Sólo vistas con filter_key configurado
+  // Sólo vistas con filter_key configurado o detectable
   const linkedViews = useMemo(() =>
-    customViews.filter(v => v.filter_key && v.entity_id),
+    customViews.filter(v => (v.filter_key || detectCwpColumn(v.columns || [])) && v.entity_id),
     [customViews]
   );
 
@@ -163,7 +164,8 @@ export default function CWPMatrix({ cwpGroups, customViews, entities, onSelectCW
         if (error || !data) return;
 
         views.forEach(view => {
-          const filterKey = view.filter_key;
+          const filterKey = view.filter_key || detectCwpColumn(view.columns || []);
+          if (!filterKey) return;
           const docIdCol  = getDocIdColumn(view);
 
           data.forEach(r => {

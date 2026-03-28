@@ -7,6 +7,7 @@ import {
   ChevronRight, Layers, Filter, CheckSquare, Square
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { detectCwpColumn } from '@/lib/cwp-utils';
 import type { EntityWithAttributes, CustomView } from '@/types';
 
 interface CustomViewManagerProps {
@@ -57,7 +58,7 @@ export default function CustomViewManager({ entities, customViews, onRefresh, Em
         name: formData.name,
         entity_id: formData.entity_id,
         columns: formData.columns,
-        filter_key: formData.filter_key || null,
+        filter_key: formData.filter_key || detectCwpColumn(formData.columns) || null,
         project_id: (entity as any)?.project_id || null
       };
 

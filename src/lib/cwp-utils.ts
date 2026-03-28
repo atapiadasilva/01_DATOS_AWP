@@ -3,11 +3,8 @@
  * Single source of truth — used by DataEditor, RelationalExplorer, EmbeddedView.
  */
 
-export const CWP_COLUMN_NAMES = ['CWP', 'PACKAGE', 'PAQUETE'] as const;
-export type CwpColumnName = (typeof CWP_COLUMN_NAMES)[number];
-
 export const CWP_FILTER_KEYS = [
-  'CWP', 'PACKAGE', 'PAQUETE', 'WBS', 'EDT', 'PLANO', 'DRAWING',
+  'CWP', 'PACKAGE', 'PAQUETE', 'WBS', 'EDT', 'PLANO', 'DRAWING'
 ] as const;
 
 /**
@@ -15,9 +12,12 @@ export const CWP_FILTER_KEYS = [
  * Comparison is case-insensitive and trims whitespace.
  */
 export function detectCwpColumn(columns: string[]): string | undefined {
-  return columns.find(c =>
-    (CWP_COLUMN_NAMES as ReadonlyArray<string>).includes(c.toUpperCase().trim())
-  );
+  const upperCols = columns.map(c => c.toUpperCase().trim());
+  for (const key of CWP_FILTER_KEYS) {
+    const idx = upperCols.indexOf(key);
+    if (idx !== -1) return columns[idx];
+  }
+  return undefined;
 }
 
 /**
