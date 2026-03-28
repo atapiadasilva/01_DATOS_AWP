@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import {
   Star, Briefcase, Users, FileText, Calendar,
   FolderGit2, ChevronDown, ChevronRight, Activity,
-  Network, CheckSquare, Search, GitMerge, ShoppingCart, LayoutGrid, Grid3x3, Settings, Crown, Link2, ShieldCheck, BarChart3, Shield, Box, LayoutTemplate, Film
+  Network, CheckSquare, Search, GitMerge, ShoppingCart, LayoutGrid, Grid3x3, Settings, Crown, Link2, ShieldCheck, BarChart3, Shield, Box, LayoutTemplate, Film, CalendarRange, Clapperboard
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
@@ -130,7 +130,9 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
           <NavItem id="drawing-log" label="Log de Planos"   icon={FileText} />
           <NavItem id="viewer3d"    label="Visor 3D / BIM"  icon={Box} />
           <NavItem id="viewer3d-wbs" label="Visor 3D + Programa" icon={LayoutTemplate} />
-          <NavItem id="viewer4d"    label="Simulación 4D"       icon={Film} />
+          <NavItem id="viewer4d"         label="Simulación 4D"          icon={Film} />
+          <NavItem id="weekly-plan"      label="Planif. Trisemanal"     icon={CalendarRange} />
+          <NavItem id="weekly-plan-4d"   label="4D Trisemanal"          icon={Clapperboard} />
         </NavSection>
 
         <NavSection id="procura" label="Suministros & Procura" icon={ShoppingCart}>

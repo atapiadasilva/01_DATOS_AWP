@@ -21,8 +21,10 @@ function hexToVec4(hex: string, alpha = 0.85): any {
 interface APSViewer4DProps {
   onSelectionChange?: (externalIds: string[]) => void;
   onModelUrnReady?:   (urn: string) => void;
+  /** Elements to color (in-progress tasks) */
   elementColors?:     ElementColor[];
-  selectionIds?:      string[];
+  /** Elements that are "done" — visible at original model color, not ghosted, no theming */
+  doneIds?:           string[];
   globalGrey?:        boolean;
 }
 
@@ -30,13 +32,15 @@ export default function APSViewer4D({
   onSelectionChange,
   onModelUrnReady,
   elementColors,
-  selectionIds,
+  doneIds,
   globalGrey = true,
 }: APSViewer4DProps = {}) {
   const containerRef        = useRef<HTMLDivElement>(null);
   const viewerRef           = useRef<any>(null);
   const extIdToDbIdRef      = useRef<Record<string, number>>({});
+  const dbIdToExtIdRef      = useRef<Record<number, string>>({});
   const elementColorsRef    = useRef<ElementColor[]>([]);
+  const doneIdsRef          = useRef<string[]>([]);
   const modelLoadedRef      = useRef(false);
 
   const [sdkReady,    setSdkReady]    = useState(false);
@@ -44,30 +48,42 @@ export default function APSViewer4D({
   const [status,      setStatus]      = useState('Inicializando Viewer…');
   const [error,       setError]       = useState('');
   const [modelName,   setModelName]   = useState('');
+  const globalGreyRef    = useRef<boolean>(true);
 
-  // Keep ref in sync so event handlers see latest colors
+  // Keep refs in sync so event handlers see latest values
   useEffect(() => { elementColorsRef.current = elementColors ?? []; }, [elementColors]);
+  useEffect(() => { doneIdsRef.current       = doneIds       ?? []; }, [doneIds]);
+  useEffect(() => { globalGreyRef.current    = globalGrey    ?? true; }, [globalGrey]);
 
-  // Apply 4D state whenever elementColors or ghostMode changes
+  // Apply 4D state whenever props change (if model loaded)
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer || !modelLoadedRef.current) return;
 
-    // 1. Collect the dbIds that are "active" (have a status color)
-    const activeDbIds = (elementColors ?? [])
+    // dbIds of colored (in-progress) elements
+    const coloredDbIds = (elementColors ?? [])
       .map(({ externalId }) => extIdToDbIdRef.current[externalId])
       .filter((id): id is number => id != null);
 
-    // 2. Ghost mode: use viewer.isolate() — APS natively makes non-isolated elements
-    //    transparent/ghost. This gives real transparency, not a color hack.
-    if (globalGrey && activeDbIds.length > 0) {
-      viewer.isolate(activeDbIds, viewer.model);
+    // dbIds of done elements — isolated (not ghosted) but NO theming → original model color
+    const doneDbIds = (doneIds ?? [])
+      .map(id => extIdToDbIdRef.current[id])
+      .filter((id): id is number => id != null);
+
+    // All visible (non-ghost) = colored + done
+    const isolateDbIds = [...coloredDbIds, ...doneDbIds];
+
+    if (globalGrey) {
+      viewer.isolate(isolateDbIds.length > 0 ? isolateDbIds : [-1], viewer.model);
     } else {
-      // No active elements yet, or ghost mode off → show everything normally
-      viewer.isolate(undefined, viewer.model);
+       if (isolateDbIds.length > 0) {
+         viewer.isolate(isolateDbIds, viewer.model);
+       } else {
+         viewer.isolate(undefined, viewer.model);
+       }
     }
 
-    // 3. Apply vivid status colors on top of the isolated elements
+    // Apply colors only to in-progress elements; done elements keep original color
     viewer.clearThemingColors();
     for (const { externalId, hex, alpha } of (elementColors ?? [])) {
       const dbId = extIdToDbIdRef.current[externalId];
@@ -76,7 +92,7 @@ export default function APSViewer4D({
     }
 
     viewer.impl?.invalidate(true);
-  }, [elementColors, globalGrey]);
+  }, [elementColors, doneIds, globalGrey]);
 
 
   // Load APS SDK (shared across tabs — idempotent)
@@ -121,18 +137,13 @@ export default function APSViewer4D({
         viewer.setTheme('dark-theme');
         viewerRef.current = viewer;
 
-        // Selection → emit externalIds
+        // Selection → emit externalIds synchronously to prevent race conditions during rapid multi-select
         viewer.addEventListener(
           window.Autodesk.Viewing.SELECTION_CHANGED_EVENT,
-          async (ev: any) => {
+          (ev: any) => {
             const dbIds: number[] = ev.dbIdArray ?? [];
             if (!dbIds.length) { onSelectionChange?.([]); return; }
-            const extIds = await Promise.all(
-              dbIds.map(dbId => new Promise<string>(res =>
-                viewer.getProperties(dbId, (p: any) => res(p.externalId ?? String(dbId)),
-                  () => res(String(dbId)))
-              ))
-            );
+            const extIds = dbIds.map(dbId => dbIdToExtIdRef.current[dbId] ?? String(dbId));
             onSelectionChange?.(extIds);
           }
         );
@@ -143,17 +154,29 @@ export default function APSViewer4D({
           () => {
             viewer.model?.getExternalIdMapping((extMap: Record<string, number>) => {
               extIdToDbIdRef.current = extMap;
+              
+              // Build reverse map for rapid synchronous selection lookups
+              const db2ext: Record<number, string> = {};
+              for (const [extId, dbId] of Object.entries(extMap)) {
+                db2ext[dbId] = extId;
+              }
+              dbIdToExtIdRef.current = db2ext;
+              
               modelLoadedRef.current = true;
-              // Re-trigger the colors effect now that dbId map is ready
-              // by forcing a re-render via a dummy state update is not needed —
-              // the useEffect below reads elementColorsRef directly on next tick.
-              // We call the isolation logic inline instead:
-              const colors = elementColorsRef.current;
-              const activeDbIds = colors
-                .map(({ externalId }) => extMap[externalId])
-                .filter((id): id is number => id != null);
-              if (activeDbIds.length > 0) {
-                viewer.isolate(activeDbIds, viewer.model);
+              // Apply pending 4D state now that the dbId map is ready
+              const colors    = elementColorsRef.current;
+              const done      = doneIdsRef.current;
+              const coloredDbIds = colors.map(({ externalId }) => extMap[externalId]).filter((id): id is number => id != null);
+              const doneDbIds    = done.map(id => extMap[id]).filter((id): id is number => id != null);
+              const isolateDbIds = [...coloredDbIds, ...doneDbIds];
+              if (globalGreyRef.current) {
+                viewer.isolate(isolateDbIds.length > 0 ? isolateDbIds : [-1], viewer.model);
+              } else {
+                if (isolateDbIds.length > 0) {
+                  viewer.isolate(isolateDbIds, viewer.model);
+                } else {
+                  viewer.isolate(undefined, viewer.model);
+                }
               }
               viewer.clearThemingColors();
               for (const { externalId, hex, alpha } of colors) {

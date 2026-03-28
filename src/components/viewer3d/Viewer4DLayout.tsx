@@ -140,7 +140,14 @@ export default function Viewer4DLayout() {
   const [playing,      setPlaying]      = useState(false);
   const [speed,        setSpeed]        = useState<typeof SPEEDS[number]>(7);
   const [activeTask,   setActiveTask]   = useState<Task4D | null>(null);
+  const [editDraft,    setEditDraft]    = useState<Partial<Task4D> | null>(null);
   const [globalGrey,   setGlobalGrey]   = useState(true);
+  const [saving,       setSaving]       = useState(false);
+  
+  const dragRef = useRef<{
+    edt: string; type: 'move' | 'start' | 'end'; startX: number;
+    origStart: string; origEnd: string; curStart: string; curEnd: string;
+  } | null>(null);
 
   const { projStart, totalPx, months, todayPx } = useGanttGeometry(tasks);
 
@@ -192,20 +199,26 @@ export default function Viewer4DLayout() {
   }, [playing, speed, tasks]);
 
   // ── 4D element colors ─────────────────────────────────────────────────────
-  // Not-started elements intentionally omitted: the globalGrey root coat covers them.
-  // Only in-progress / complete / late elements get an explicit color override.
-  const elementColors = useMemo<ElementColor[]>(() => {
+  // in-progress → amber (construction active)
+  // complete / late → doneIds: isolated but NO color override → returns to original model color
+  // not-started → omitted: ghosted by isolate()
+  const { elementColors, doneIds } = useMemo(() => {
     const colors: ElementColor[] = [];
+    const done:   string[]       = [];
     for (const task of tasks) {
       if (!task.externalIds.length) continue;
       const status = getStatus(task, currentDate);
-      const hex    = STATUS_COLOR[status];
-      if (!hex) continue; // not-started → stay phantom via root theming
-      for (const extId of task.externalIds) {
-        colors.push({ externalId: extId, hex, alpha: 0.96 }); // high alpha = vivid, "turned on"
+      if (status === 'in-progress') {
+        for (const extId of task.externalIds) {
+          colors.push({ externalId: extId, hex: STATUS_COLOR['in-progress'], alpha: 0.96 });
+        }
+      } else if (status === 'complete' || status === 'late') {
+        // Visible at original model color — no theming, just not ghosted
+        done.push(...task.externalIds);
       }
+      // not-started: neither → ghosted by viewer.isolate()
     }
-    return colors;
+    return { elementColors: colors, doneIds: done };
   }, [tasks, currentDate]);
 
   // ── Visible tasks (tree collapse) ─────────────────────────────────────────
@@ -257,6 +270,84 @@ export default function Viewer4DLayout() {
     window.addEventListener('mouseup',   onUp);
   };
 
+  // ── Gantt Drag & Drop ─────────────────────────────────────────────────────
+  const onBarMouseDown = useCallback((e: React.MouseEvent, task: Task4D, type: 'move' | 'start' | 'end') => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!task.start || !task.end) return;
+    
+    dragRef.current = {
+      edt: task.edt, type, startX: e.clientX,
+      origStart: task.start, origEnd: task.end,
+      curStart: task.start, curEnd: task.end
+    };
+
+    const onMove = (mv: MouseEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      const deltaDays = Math.round((mv.clientX - d.startX) / PX_PER_DAY);
+      const origS = new Date(d.origStart + 'T00:00:00');
+      const origE = new Date(d.origEnd + 'T00:00:00');
+      let curSa = new Date(origS);
+      let curEa = new Date(origE);
+
+      if (d.type === 'move')  {
+        curSa.setDate(curSa.getDate() + deltaDays);
+        curEa.setDate(curEa.getDate() + deltaDays);
+      }
+      if (d.type === 'start') {
+        curSa.setDate(curSa.getDate() + deltaDays);
+        if (curSa >= origE) curSa = new Date(origE.getTime() - 86400_000);
+      }
+      if (d.type === 'end') {
+        curEa.setDate(curEa.getDate() + deltaDays);
+        if (curEa <= origS) curEa = new Date(origS.getTime() + 86400_000);
+      }
+      
+      const curS = curSa.toISOString().split('T')[0];
+      const curE = curEa.toISOString().split('T')[0];
+
+      d.curStart = curS;
+      d.curEnd   = curE;
+
+      setTasks(p => p.map(a => a.edt === d.edt ? { ...a, start: curS, end: curE } : a));
+    };
+
+    const onUp = async () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup',   onUp);
+      const d = dragRef.current;
+      if (!d) return;
+      dragRef.current = null;
+      
+      const t = tasks.find(x => x.edt === d.edt);
+      if (!t || !currentProject?.id) return;
+
+      Object.assign(t, { start: d.curStart, end: d.curEnd });
+
+      setSaving(true);
+      try {
+        await fetch('/api/aps/wbs-linked', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: currentProject.id,
+            edt: d.edt,
+            startDate: d.curStart,
+            endDate: d.curEnd
+          })
+        });
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup',   onUp);
+  }, [tasks, currentProject]);
+
   // ── Scrubber range ────────────────────────────────────────────────────────
   const allDates = useMemo(() => {
     const ts = tasks.flatMap(t => [t.start, t.end]).filter(Boolean).map(s => new Date(s!).getTime());
@@ -295,10 +386,67 @@ export default function Viewer4DLayout() {
     return counts;
   }, [tasks, currentDate]);
 
+  // ── Save edited task ──────────────────────────────────────────────────────
+  const handleSaveTask = async () => {
+    if (!editDraft || !currentProject?.id) return;
+    setSaving(true);
+    try {
+      await fetch('/api/aps/wbs-linked', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: currentProject.id,
+          edt: editDraft.edt,
+          startDate: editDraft.start,
+          endDate: editDraft.end
+        })
+      });
+      setTasks(p => p.map(a => a.edt === editDraft.edt ? { ...a, start: editDraft.start ?? null, end: editDraft.end ?? null } : a));
+      setActiveTask(null);
+      setEditDraft(null);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div ref={containerRef}
-      className="flex flex-col w-full flex-1 min-h-0 overflow-hidden rounded-xl
+      className="relative flex flex-col w-full flex-1 min-h-0 overflow-hidden rounded-xl
         border border-slate-200 shadow-sm bg-slate-900">
+
+      {/* ── Floating Editor Panel ────────────────────────────────────────── */}
+      {activeTask && editDraft && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-80 bg-white border border-blue-200 shadow-2xl rounded-lg overflow-hidden">
+          <div className="flex items-center justify-between bg-blue-50 px-3 py-2 border-b border-blue-100">
+            <span className="text-[11px] font-bold text-slate-700 truncate mr-2">{editDraft.edt} — {editDraft.name}</span>
+            <button onClick={() => { setActiveTask(null); setEditDraft(null); }} className="text-slate-400 hover:text-slate-700">
+               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+          <div className="p-3 flex flex-col gap-2 bg-slate-50 text-[11px]">
+            <div className="flex gap-2">
+              <div className="flex flex-col gap-1 flex-1">
+                <span className="text-[9px] text-slate-500 uppercase tracking-wide">Inicio</span>
+                <input type="date" value={editDraft.start ?? ''} onChange={e => setEditDraft({ ...editDraft, start: e.target.value })}
+                  className="px-2 py-1 rounded border border-slate-300 bg-white text-slate-700 focus:ring-1 focus:ring-blue-400 focus:outline-none" />
+              </div>
+              <div className="flex flex-col gap-1 flex-1">
+                <span className="text-[9px] text-slate-500 uppercase tracking-wide">Fin</span>
+                <input type="date" value={editDraft.end ?? ''} onChange={e => setEditDraft({ ...editDraft, end: e.target.value })}
+                  className="px-2 py-1 rounded border border-slate-300 bg-white text-slate-700 focus:ring-1 focus:ring-blue-400 focus:outline-none" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-1 mt-1">
+              <button disabled={saving} onClick={() => { setActiveTask(null); setEditDraft(null); }} className="px-2.5 py-1 rounded text-slate-500 hover:bg-slate-200 transition-colors">Cancelar</button>
+              <button disabled={saving} onClick={handleSaveTask} className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-500 transition-colors flex items-center gap-1 font-medium">
+                {saving ? 'Guardando...' : 'Guardar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── 3D Viewer ────────────────────────────────────────────────────── */}
       <div className="shrink-0 overflow-hidden"
@@ -306,6 +454,8 @@ export default function Viewer4DLayout() {
         <APSViewer4D
           onModelUrnReady={setModelUrn}
           elementColors={elementColors}
+          doneIds={doneIds}
+          globalGrey={globalGrey}
         />
       </div>
 
@@ -589,21 +739,31 @@ export default function Viewer4DLayout() {
                         {/* Main bar */}
                         {barLeft != null && barWidth != null && (
                           <div
-                            className={`absolute rounded ${
+                            className={`absolute rounded cursor-grab active:cursor-grabbing ${
                               status === 'not-started'
                                 ? 'bg-slate-200'
                                 : STATUS_BAR_BG[status]
-                            } transition-colors`}
+                            } transition-colors group/bar`}
                             style={{
                               left:   barLeft,
                               width:  barWidth,
                               top:    5,
                               height: 14,
                             }}
+                            onMouseDown={e => onBarMouseDown(e, task, 'move')}
                           >
+                            {/* Left resize handle */}
+                            <div className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize opacity-0 group-hover/bar:opacity-100 transition-opacity"
+                              style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '3px 0 0 3px' }}
+                              onMouseDown={e => onBarMouseDown(e, task, 'start')} />
+                            {/* Right resize handle */}
+                            <div className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize opacity-0 group-hover/bar:opacity-100 transition-opacity"
+                              style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '0 3px 3px 0' }}
+                              onMouseDown={e => onBarMouseDown(e, task, 'end')} />
+
                             {/* Progress fill */}
                             {task.progress > 0 && status !== 'not-started' && (
-                              <div className="absolute inset-y-0 left-0 rounded bg-black/20"
+                              <div className="absolute inset-y-0 left-0 rounded bg-black/20 pointer-events-none"
                                 style={{ width: `${task.progress}%` }} />
                             )}
                           </div>

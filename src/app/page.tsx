@@ -42,7 +42,9 @@ import CWPMatcher from '@/components/mapping/CWPMatcher';
 import SourceOfTruth from '@/components/config/SourceOfTruth';
 import APSViewer from '@/components/viewer3d/APSViewer';
 import ViewerWBSLayout  from '@/components/viewer3d/ViewerWBSLayout';
-import Viewer4DLayout   from '@/components/viewer3d/Viewer4DLayout';
+import Viewer4DLayout      from '@/components/viewer3d/Viewer4DLayout';
+import WeeklyPlanLayout    from '@/components/weekly-plan/WeeklyPlanLayout';
+import WeeklyPlan4DLayout  from '@/components/weekly-plan/WeeklyPlan4DLayout';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
@@ -1174,6 +1176,20 @@ export default function Home() {
           {activeTab === 'viewer4d' && (
             <div className="absolute inset-0 p-4 flex flex-col">
               <Viewer4DLayout />
+            </div>
+          )}
+
+          {/* ─── Planificación Trisemanal ─── */}
+          {activeTab === 'weekly-plan' && (
+            <div className="absolute inset-0 p-4 flex flex-col">
+              <WeeklyPlanLayout />
+            </div>
+          )}
+
+          {/* ─── 4D Trisemanal ─── */}
+          {activeTab === 'weekly-plan-4d' && (
+            <div className="absolute inset-0 p-4 flex flex-col">
+              <WeeklyPlan4DLayout />
             </div>
           )}
 

@@ -8,6 +8,12 @@ const supabase = createClient(
 
 function excelToIso(serial: any): string | null {
   if (!serial) return null;
+  
+  // if already standard format YYYY-MM-DD
+  if (typeof serial === 'string' && /^\d{4}-\d{2}-\d{2}/.test(serial)) {
+    return serial.split('T')[0];
+  }
+
   const n = Number(serial);
   if (isNaN(n) || n <= 0) {
     if (typeof serial === 'string' && serial.includes('.')) {
@@ -52,7 +58,7 @@ export async function GET(req: NextRequest) {
         .from('aps_wbs_links')
         .select('wbs_id, external_id')
         .eq('model_urn', modelUrn);
-      links = fallbackLinks;
+      links = fallbackLinks as any;
   }
 
   if (!links?.length) return NextResponse.json([]);
@@ -60,7 +66,7 @@ export async function GET(req: NextRequest) {
   // Build map: wbs_id → [externalId, ...]
   const edtToIds: Record<string, string[]> = {};
   for (const l of links) {
-    const key = l.wbs_id || l.edt; // support legacy if any
+    const key = l.wbs_id || (l as any).edt; // support legacy if any
     if (!key) continue;
     if (!edtToIds[key]) edtToIds[key] = [];
     edtToIds[key].push(l.external_id);
@@ -104,7 +110,7 @@ export async function GET(req: NextRequest) {
 
   // 3. Include directly-linked tasks + their ancestor summary tasks
   const includedEdts = new Set<string>();
-  for (const edt of directLinkedEdts) {
+  for (const edt of Array.from(directLinkedEdts)) {
     includedEdts.add(edt);
     const parts = edt.split('.');
     for (let i = 1; i < parts.length; i++) {
@@ -127,4 +133,43 @@ export async function GET(req: NextRequest) {
     }));
 
   return NextResponse.json(tasks);
+}
+
+export async function PUT(req: NextRequest) {
+  const { projectId, edt, startDate, endDate } = await req.json();
+  if (!projectId || !edt || !startDate || !endDate) return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
+
+  // 1. Find the PROGRAMA DE OBRA ACTUALIZADO entity for this project
+  const { data: ents } = await supabase
+    .from('entities')
+    .select('id')
+    .eq('name', 'PROGRAMA DE OBRA ACTUALIZADO')
+    .eq('project_id', projectId);
+  if (!ents?.length) return NextResponse.json({ error: 'No program entity found' }, { status: 404 });
+
+  // 2. Fetch records to find the specific EDT
+  const { data: records, error: fetchErr } = await supabase
+    .from('data_records')
+    .select('id, data')
+    .in('entity_id', ents.map(e => e.id));
+
+  if (fetchErr) return NextResponse.json({ error: fetchErr.message }, { status: 500 });
+  
+  const record = (records ?? []).find((r: any) => String(r.data?.EDT) === String(edt));
+  if (!record) return NextResponse.json({ error: 'Record not found for EDT ' + edt }, { status: 404 });
+
+  // 3. Update the dates inside the JSONB structure
+  const updatedData = {
+    ...(record.data as any),
+    'Comienzo Actual': startDate,
+    'Fin Actual': endDate
+  };
+
+  const { error: updateErr } = await supabase
+    .from('data_records')
+    .update({ data: updatedData })
+    .eq('id', record.id);
+
+  if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
 }
