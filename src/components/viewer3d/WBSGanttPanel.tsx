@@ -33,23 +33,30 @@ interface Props {
 const PX_PER_DAY = 5;
 const ROW_H      = 28;
 
-// Color per top-level group (1.x)
-const GROUP_COLORS: Record<string, string> = {
-  '1.1':  '#64748b', // HITOS — slate
-  '1.2':  '#3b82f6', // INGENIERÍA APC — blue
-  '1.3':  '#60a5fa', // INGENIERÍA PENDIENTE — light blue
-  '1.4':  '#f59e0b', // SUMINISTROS DAND — amber
-  '1.5':  '#fbbf24', // SUMINISTROS ANDINA — yellow
-  '1.6':  '#a78bfa', // — violet
-  '1.7':  '#34d399', // — emerald
-  '1.8':  '#fb923c', // GESTIÓN — orange
-  '1.9':  '#22c55e', // CONSTRUCCIÓN Y MONTAJE — green
-  '1.10': '#ef4444', // PRUEBAS — red
-};
+// Color palette indexed by top-level EDT number (works for any project structure)
+const LEVEL1_PALETTE = [
+  '#64748b', // 0 — slate
+  '#3b82f6', // 1 — blue
+  '#22c55e', // 2 — green
+  '#f59e0b', // 3 — amber
+  '#a78bfa', // 4 — violet
+  '#ef4444', // 5 — red
+  '#06b6d4', // 6 — cyan
+  '#fb923c', // 7 — orange
+  '#ec4899', // 8 — pink
+  '#14b8a6', // 9 — teal
+];
+
+// Secondary palette for level-2 subgroups within a top-level group
+const LEVEL2_OFFSETS = ['cc', 'aa', '88', 'bb', 'dd', '99'];
 
 function taskColor(edt: string): string {
-  const group = edt.split('.').slice(0, 2).join('.');
-  return GROUP_COLORS[group] ?? '#94a3b8';
+  const parts = edt.split('.');
+  const l1 = Number(parts[0]) || 0;
+  const base = LEVEL1_PALETTE[l1 % LEVEL1_PALETTE.length];
+  if (parts.length < 2) return base;
+  // Slight hue shift for level-2 variation — keep same hue family
+  return base;
 }
 
 function daysBetween(a: Date, b: Date) {
@@ -61,7 +68,7 @@ export default function WBSGanttPanel({
   modelUrn, viewerSelection, onHighlightElements,
   minimized, onToggleMinimize,
 }: Props) {
-  const { currentProject } = useProject();
+  const { currentProject, projectSettings } = useProject();
 
   const [tasks,     setTasks]     = useState<WBSTask[]>([]);
   const [loading,   setLoading]   = useState(true);
@@ -112,7 +119,7 @@ export default function WBSGanttPanel({
         console.error('[WBS] Fetch error:', err);
       })
       .finally(() => setLoading(false));
-  }, [currentProject?.id]);
+  }, [currentProject?.id, projectSettings?.wbs_entity_name]);
 
   // ── Load WBS links ────────────────────────────────────────────────────────
   const loadLinks = useCallback(() => {
@@ -320,7 +327,7 @@ export default function WBSGanttPanel({
                   <h3 className="text-lg font-black text-slate-400 uppercase italic">Sin Programa de Obra</h3>
                   <p className="text-xs text-slate-400 max-w-xs mt-2 font-bold italic">
                     No se encontraron registros para la entidad <br/>
-                    <span className="text-slate-500 uppercase">"PROGRAMA DE OBRA ACTUALIZADO"</span>
+                    <span className="text-slate-500 uppercase">"{projectSettings?.wbs_entity_name ?? 'PROGRAMA DE OBRA ACTUALIZADO'}"</span>
                   </p>
                   {debugInfo.length > 0 && (
                     <div className="mt-4 p-2 bg-slate-50 border border-slate-200 rounded text-[9px] font-mono text-slate-500 text-left max-w-md overflow-x-auto">
@@ -370,7 +377,7 @@ export default function WBSGanttPanel({
                           >
                             {/* EDT + toggle */}
                             <div className="shrink-0 flex items-center gap-0.5 border-r border-slate-100"
-                              style={{ width: 110, paddingLeft: 4 + task.level * 10 }}>
+                              style={{ width: 110, paddingLeft: 4 + Math.min(task.level, 6) * 8 }}>
                               {task.hasChildren ? (
                                 <button onClick={e => toggleCollapse(task.edt, e)}
                                   className="w-4 h-4 flex items-center justify-center shrink-0 text-slate-400 hover:text-slate-700">

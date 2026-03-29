@@ -122,7 +122,7 @@ function useGanttGeometry(tasks: Task4D[]) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function Viewer4DLayout() {
-  const { currentProject } = useProject();
+  const { currentProject, projectSettings } = useProject();
   const containerRef = useRef<HTMLDivElement>(null);
   const leftRef      = useRef<HTMLDivElement>(null);
   const rightRef     = useRef<HTMLDivElement>(null);
@@ -177,7 +177,7 @@ export default function Viewer4DLayout() {
       })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [currentProject?.id, modelUrn]);
+  }, [currentProject?.id, modelUrn, projectSettings?.wbs_entity_name]);
 
   // ── Play/Pause animation ──────────────────────────────────────────────────
   useEffect(() => {
