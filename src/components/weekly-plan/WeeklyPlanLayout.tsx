@@ -125,7 +125,7 @@ export default function WeeklyPlanLayout() {
   // Layout
   const containerRef = useRef<HTMLDivElement>(null);
   const dragging     = useRef(false);
-  const [viewerPct, setViewerPct] = useState(42);
+  const [viewerPct, setViewerPct] = useState(52);
   const [panelMin,  setPanelMin]  = useState(false);
 
   // Data
@@ -379,7 +379,7 @@ export default function WeeklyPlanLayout() {
     const onMove = (mv: MouseEvent) => {
       if (!dragging.current || !containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
-      setViewerPct(Math.min(80, Math.max(15, Math.round(((mv.clientY - rect.top) / rect.height) * 100))));
+      setViewerPct(Math.min(85, Math.max(20, Math.round(((mv.clientY - rect.top) / rect.height) * 100))));
     };
     const onUp = () => { dragging.current = false; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
     window.addEventListener('mousemove', onMove);
