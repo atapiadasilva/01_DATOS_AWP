@@ -64,5 +64,7 @@ export interface CustomView {
   filter_key: string | null;
   project_id: string | null;
   table_name: string | null;
+  is_global: boolean;
+  entity_name: string | null;
   created_at: string;
 }

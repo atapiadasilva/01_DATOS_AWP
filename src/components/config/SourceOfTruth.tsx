@@ -32,6 +32,8 @@ interface CWPRecord {
   discipline: string;
   ewp_code: string;
   pwp_code: string;
+  area: string;
+  tags: string;
   is_active: boolean;
   sort_order?: number;
 }
@@ -40,7 +42,7 @@ type EditableFields = Omit<CWPRecord, 'id' | 'project_id' | 'sort_order'>;
 
 const EMPTY_FORM: EditableFields = {
   cwp_code: '', cwp_description: '', discipline: '',
-  ewp_code: '', pwp_code: '', is_active: true,
+  ewp_code: '', pwp_code: '', area: '', tags: '', is_active: true,
 };
 
 // Resultado del RPC
@@ -50,6 +52,8 @@ interface ExtractedRow {
   discipline: string;
   ewp_code: string;
   pwp_code: string;
+  area: string;
+  tags: string;
   row_count: number;
   selected?: boolean;
   already_in_master?: boolean;
@@ -62,6 +66,8 @@ interface ColMapping {
   disc: string;
   ewp: string;
   pwp: string;
+  area: string;
+  tags: string;
 }
 
 interface SourceOfTruthProps {
@@ -87,7 +93,7 @@ export default function SourceOfTruth({ entities = [], projectId }: SourceOfTrut
   // ── Estado del extractor ───────────────────────────────────────────────
   const [showExtractor, setShowExtractor] = useState(false);
   const [extEntityId, setExtEntityId] = useState('');
-  const [colMap, setColMap] = useState<ColMapping>({ cwp: '', desc: '', disc: '', ewp: '', pwp: '' });
+  const [colMap, setColMap] = useState<ColMapping>({ cwp: '', desc: '', disc: '', ewp: '', pwp: '', area: '', tags: '' });
   const [extractedRows, setExtractedRows] = useState<ExtractedRow[]>([]);
   const [isExtracting, setIsExtracting] = useState(false);
   const [isAddingSelected, setIsAddingSelected] = useState(false);
@@ -147,7 +153,16 @@ export default function SourceOfTruth({ entities = [], projectId }: SourceOfTrut
 
   // ── CRUD ───────────────────────────────────────────────────────────────
   const openEdit = (r: CWPRecord) => {
-    setFormData({ cwp_code: r.cwp_code, cwp_description: r.cwp_description, discipline: r.discipline, ewp_code: r.ewp_code, pwp_code: r.pwp_code, is_active: r.is_active });
+    setFormData({ 
+      cwp_code: r.cwp_code, 
+      cwp_description: r.cwp_description, 
+      discipline: r.discipline, 
+      ewp_code: r.ewp_code, 
+      pwp_code: r.pwp_code, 
+      area: r.area || '',
+      tags: r.tags || '',
+      is_active: r.is_active 
+    });
     setEditingId(r.id!);
   };
 
@@ -166,6 +181,8 @@ export default function SourceOfTruth({ entities = [], projectId }: SourceOfTrut
         discipline: formData.discipline.trim().toUpperCase(),
         ewp_code: formData.ewp_code.trim().toUpperCase(),
         pwp_code: formData.pwp_code.trim().toUpperCase(),
+        area: formData.area.trim().toUpperCase(),
+        tags: formData.tags.trim(),
         is_active: formData.is_active,
       };
       if (editingId === 'new') {
@@ -220,6 +237,8 @@ export default function SourceOfTruth({ entities = [], projectId }: SourceOfTrut
           discipline: String(row['DISCIPLINA'] || row['discipline'] || '').trim().toUpperCase(),
           ewp_code: String(row['EWP'] || row['ewp_code'] || '').trim().toUpperCase(),
           pwp_code: String(row['PWP'] || row['pwp_code'] || '').trim().toUpperCase(),
+          area: String(row['AREA'] || row['area'] || '').trim().toUpperCase(),
+          tags: String(row['TAGS'] || row['tags'] || '').trim(),
           is_active: true,
         })).filter(r => r.cwp_code);
         if (!parsed.length) { showToast('error', 'No se encontraron filas con columna CWP.'); return; }
@@ -245,14 +264,16 @@ export default function SourceOfTruth({ entities = [], projectId }: SourceOfTrut
     const find = (...keys: string[]) => entityColumns.find(c =>
       keys.some(k => c.toLowerCase().replace(/[\s_-]/g, '') === k.toLowerCase())
     ) ?? '';
-    setColMap({
-      cwp:  find('cwp', 'codigocwp', 'cwpcode', 'cwp_code'),
-      desc: find('descripcioncwp', 'descripcion', 'description', 'cwpdescription', 'desc'),
-      disc: find('disciplina', 'discipline', 'disc'),
-      ewp:  find('ewp', 'codigoewp', 'ewpcode'),
-      pwp:  find('pwp', 'codigopwp', 'pwpcode'),
-    });
-  }, [entityColumns]);
+      setColMap({
+        cwp:  find('cwp', 'codigocwp', 'cwpcode', 'cwp_code'),
+        desc: find('descripcioncwp', 'descripcion', 'description', 'cwpdescription', 'desc'),
+        disc: find('disciplina', 'discipline', 'disc'),
+        ewp:  find('ewp', 'codigoewp', 'ewpcode'),
+        pwp:  find('pwp', 'codigopwp', 'pwpcode'),
+        area: find('area', 'sector', 'zona', 'location'),
+        tags: find('tags', 'comentarios', 'observaciones', 'tags_cwp'),
+      });
+    }, [entityColumns]);
 
   // ── EXTRACTOR: ejecutar RPC ────────────────────────────────────────────
   const masterCodes = useMemo(() => new Set(records.map(r => r.cwp_code)), [records]);
@@ -269,6 +290,8 @@ export default function SourceOfTruth({ entities = [], projectId }: SourceOfTrut
         p_disc_col:  colMap.disc || null,
         p_ewp_col:   colMap.ewp  || null,
         p_pwp_col:   colMap.pwp  || null,
+        p_area_col:  colMap.area || null,
+        p_tags_col:  colMap.tags || null,
       });
       if (error) throw error;
       const rows: ExtractedRow[] = (data || []).map((r: any) => ({
@@ -278,7 +301,7 @@ export default function SourceOfTruth({ entities = [], projectId }: SourceOfTrut
       }));
       setExtractedRows(rows);
     } catch (err: any) {
-      showToast('error', 'Error al extraer. Verifica que la migración 015 esté aplicada.');
+      showToast('error', 'Error al extraer. Verifica que la migración 015 y 025 estén aplicadas.');
     } finally { setIsExtracting(false); }
   };
 
@@ -316,6 +339,8 @@ export default function SourceOfTruth({ entities = [], projectId }: SourceOfTrut
         discipline: r.discipline || '',
         ewp_code: r.ewp_code || '',
         pwp_code: r.pwp_code || '',
+        area: r.area || '',
+        tags: r.tags || '',
         is_active: true,
       }));
       const { error } = await supabase.from('cwp_master').upsert(rows, { onConflict: 'project_id,cwp_code' });
@@ -430,7 +455,7 @@ export default function SourceOfTruth({ entities = [], projectId }: SourceOfTrut
             <table className="w-full text-left border-collapse">
               <thead className="sticky top-0 z-10 bg-slate-100/90 backdrop-blur">
                 <tr>
-                  {['CWP', 'Descripción', 'Disciplina', 'EWP', 'PWP', 'Activo', ''].map(h => (
+                  {['CWP', 'Descripción', 'Disciplina', 'EWP', 'PWP', 'Area', 'Tags', 'Activo', ''].map(h => (
                     <th key={h} className="px-4 py-2.5 text-[9px] font-black uppercase tracking-widest text-slate-400 whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -493,11 +518,11 @@ export default function SourceOfTruth({ entities = [], projectId }: SourceOfTrut
               <label className="text-[9px] font-black uppercase tracking-widest text-white/40">
                 1 · Elige el archivo Excel
               </label>
-              <select value={extEntityId} onChange={e => { setExtEntityId(e.target.value); setExtractedRows([]); }}
-                className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-xs font-bold text-white outline-none focus:border-brand-electric transition-all">
-                <option value="">Seleccionar archivo...</option>
-                {entities.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-              </select>
+                <select value={extEntityId} onChange={e => { setExtEntityId(e.target.value); setExtractedRows([]); }}
+                  className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-xs font-bold text-white outline-none focus:border-brand-electric transition-all">
+                  <option value="" className="bg-brand-deep text-white">Seleccionar archivo...</option>
+                  {entities.map(e => <option key={e.id} value={e.id} className="bg-brand-deep text-white">{e.name}</option>)}
+                </select>
             </div>
 
             {/* Paso 2: Mapeo de columnas */}
@@ -513,6 +538,8 @@ export default function SourceOfTruth({ entities = [], projectId }: SourceOfTrut
                     { field: 'disc' as const, label: 'Disciplina',        required: false, color: 'text-white/70' },
                     { field: 'ewp' as const,  label: 'EWP',               required: false, color: 'text-emerald-400' },
                     { field: 'pwp' as const,  label: 'PWP',               required: false, color: 'text-amber-400' },
+                    { field: 'area' as const, label: 'Area/Sector',       required: false, color: 'text-violet-400' },
+                    { field: 'tags' as const, label: 'Tags/Coments',      required: false, color: 'text-blue-400' },
                   ]).map(({ field, label, required, color }) => (
                     <div key={field} className="flex items-center gap-3">
                       <span className={`w-36 text-[10px] font-black shrink-0 ${color}`}>{label}</span>
@@ -522,8 +549,8 @@ export default function SourceOfTruth({ entities = [], projectId }: SourceOfTrut
                         className={`flex-1 px-3 py-1.5 bg-white/5 border rounded-lg text-[10px] font-bold text-white outline-none focus:border-brand-electric transition-all ${
                           required && !colMap[field] ? 'border-rose-500/50' : 'border-white/10'
                         }`}>
-                        <option value="">{required ? 'Obligatorio...' : 'No usar'}</option>
-                        {entityColumns.map(c => <option key={c} value={c}>{c}</option>)}
+                        <option value="" className="bg-brand-deep text-white">{required ? 'Obligatorio...' : 'No usar'}</option>
+                        {entityColumns.map(c => <option key={c} value={c} className="bg-brand-deep text-white">{c}</option>)}
                       </select>
                     </div>
                   ))}
@@ -572,6 +599,8 @@ export default function SourceOfTruth({ entities = [], projectId }: SourceOfTrut
                         {colMap.disc && <th className="px-2 py-2.5 text-[8px] font-black uppercase tracking-widest text-white/30">Disc.</th>}
                         {colMap.ewp && <th className="px-2 py-2.5 text-[8px] font-black uppercase tracking-widest text-white/30">EWP</th>}
                         {colMap.pwp && <th className="px-2 py-2.5 text-[8px] font-black uppercase tracking-widest text-white/30">PWP</th>}
+                        {colMap.area && <th className="px-2 py-2.5 text-[8px] font-black uppercase tracking-widest text-white/30">Area</th>}
+                        {colMap.tags && <th className="px-2 py-2.5 text-[8px] font-black uppercase tracking-widest text-white/30">Tags</th>}
                         <th className="px-2 py-2.5 text-[8px] font-black uppercase tracking-widest text-white/30 text-right">#</th>
                       </tr>
                     </thead>
@@ -616,6 +645,16 @@ export default function SourceOfTruth({ entities = [], projectId }: SourceOfTrut
                           {colMap.pwp && (
                             <td className="px-2 py-2">
                               <span className="text-[9px] font-black text-amber-400 uppercase">{row.pwp_code || '—'}</span>
+                            </td>
+                          )}
+                          {colMap.area && (
+                            <td className="px-2 py-2">
+                              <span className="text-[9px] font-black text-violet-300 uppercase">{row.area || '—'}</span>
+                            </td>
+                          )}
+                          {colMap.tags && (
+                            <td className="px-2 py-2">
+                              <span className="text-[9px] text-blue-200 truncate block max-w-[80px]">{row.tags || '—'}</span>
                             </td>
                           )}
                           <td className="px-2 py-2 text-right">
@@ -686,6 +725,14 @@ function EditRow({ data, onChange, onSave, onCancel, isSaving, isNew = false }: 
         <input type="text" value={data.pwp_code} onChange={e => set('pwp_code', e.target.value.toUpperCase())}
           placeholder="PWP-001" className={cls} />
       </td>
+      <td className="px-3 py-2 w-32">
+        <input type="text" value={data.area} onChange={e => set('area', e.target.value.toUpperCase())}
+          placeholder="AREA-1" className={cls} />
+      </td>
+      <td className="px-3 py-2 w-32">
+        <input type="text" value={data.tags} onChange={e => set('tags', e.target.value)}
+          placeholder="Tags..." className={cls} />
+      </td>
       <td className="px-3 py-2 w-16">
         <label className="flex items-center gap-1.5 cursor-pointer">
           <input type="checkbox" checked={data.is_active} onChange={e => set('is_active', e.target.checked)}
@@ -714,24 +761,30 @@ function DataRow({ rec, onEdit, onDelete, confirmDelete, onConfirmDelete, onCanc
 }) {
   return (
     <tr className={`border-b border-slate-50 hover:bg-slate-50/80 transition-colors group ${!rec.is_active ? 'opacity-40' : ''}`}>
-      <td className="px-4 py-2.5 w-28">
-        <span className="text-xs font-black text-brand-deep uppercase tracking-wide">{rec.cwp_code}</span>
-      </td>
-      <td className="px-4 py-2.5 max-w-xs">
-        <span className="text-xs font-bold text-slate-700 line-clamp-1">{rec.cwp_description || <span className="text-slate-300 italic">—</span>}</span>
+      <td className="px-4 py-2.5 min-w-[160px]">
+        <span className="text-[11px] font-black text-brand-deep uppercase tracking-tighter whitespace-nowrap">{rec.cwp_code}</span>
       </td>
       <td className="px-4 py-2.5 w-32">
-        <span className={`inline-block px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${rec.discipline ? 'bg-brand-electric/10 text-brand-electric' : 'text-slate-300 italic'}`}>
-          {rec.discipline || 'Sin disciplina'}
+        <span className="text-[10px] font-bold text-slate-500">{rec.cwp_description || <span className="text-slate-300 italic">—</span>}</span>
+      </td>
+      <td className="px-4 py-2.5 w-28 text-center">
+        <span className={`inline-block px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${rec.discipline && rec.discipline !== '—' ? 'bg-brand-electric/10 text-brand-electric' : 'text-slate-300 italic'}`}>
+          {rec.discipline || 'Sin esp.'}
         </span>
       </td>
-      <td className="px-4 py-2.5 w-32">
+      <td className="px-4 py-2.5 w-24 text-center">
         <span className="text-[10px] font-black text-emerald-700 uppercase">{rec.ewp_code || <span className="text-slate-300">—</span>}</span>
       </td>
-      <td className="px-4 py-2.5 w-32">
+      <td className="px-4 py-2.5 w-24 text-center">
         <span className="text-[10px] font-black text-amber-700 uppercase">{rec.pwp_code || <span className="text-slate-300">—</span>}</span>
       </td>
-      <td className="px-4 py-2.5 w-16">
+      <td className="px-4 py-2.5 w-24 text-center">
+        <span className="text-[10px] font-black text-violet-700 uppercase">{rec.area || <span className="text-slate-300">—</span>}</span>
+      </td>
+      <td className="px-4 py-2.5 w-28 text-center text-blue-600 font-bold text-[10px]">
+        {rec.tags || <span className="text-slate-300">—</span>}
+      </td>
+      <td className="px-4 py-2.5 w-16 text-center">
         <span className={`text-[9px] font-black uppercase ${rec.is_active ? 'text-emerald-600' : 'text-slate-400'}`}>
           {rec.is_active ? 'SI' : 'NO'}
         </span>

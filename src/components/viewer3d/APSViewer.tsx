@@ -246,12 +246,16 @@ export default function APSViewer({ onSelectionChange, onModelUrnReady, highligh
     };
   }, [sdkReady]);
 
+
   // ── Load default model ────────────────────────────────────────────────────
   const loadDefaultModel = useCallback(async (viewer: any) => {
-    setStatus('Buscando modelo ANDINA VCAD…');
+    setStatus('Buscando modelo del proyecto…');
     setError('');
     try {
-      const r = await fetch('/api/aps/default-model');
+      const url = currentProject?.id 
+        ? `/api/aps/default-model?projectId=${currentProject.id}`
+        : '/api/aps/default-model';
+      const r = await fetch(url);
       if (!r.ok) { setError((await r.json()).error ?? 'Modelo no encontrado'); setStatus(''); return; }
       const { urn, name } = await r.json();
       modelUrnRef.current = urn;
@@ -264,7 +268,14 @@ export default function APSViewer({ onSelectionChange, onModelUrnReady, highligh
         (code: number, msg: string) => { setError(`Error (${code}): ${msg}`); setStatus(''); }
       );
     } catch (e: any) { setError(`Error: ${e.message}`); setStatus(''); }
-  }, []);
+  }, [currentProject?.id, onModelUrnReady]);
+
+  // Re-cargar modelo cuando cambia el proyecto
+  useEffect(() => {
+    if (viewerRef.current && currentProject?.id) {
+      loadDefaultModel(viewerRef.current);
+    }
+  }, [currentProject?.id, loadDefaultModel]);
 
   // ── Apply CWP colors from DB ──────────────────────────────────────────────
   const applyColorsFromDB = useCallback(async (viewer: any) => {

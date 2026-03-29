@@ -25,7 +25,8 @@ export default function CustomViewManager({ entities, customViews, onRefresh, Em
     name: '',
     entity_id: '',
     columns: [] as string[],
-    filter_key: ''
+    filter_key: '',
+    is_global: false
   });
 
   const filteredViews = useMemo(() => {
@@ -59,7 +60,9 @@ export default function CustomViewManager({ entities, customViews, onRefresh, Em
         entity_id: formData.entity_id,
         columns: formData.columns,
         filter_key: formData.filter_key || detectCwpColumn(formData.columns) || null,
-        project_id: (entity as any)?.project_id || null
+        project_id: formData.is_global ? null : ((entity as any)?.project_id || null),
+        is_global: formData.is_global,
+        entity_name: entity?.name || null
       };
 
       let error;
@@ -75,11 +78,11 @@ export default function CustomViewManager({ entities, customViews, onRefresh, Em
       
       setIsCreating(false);
       setEditingView(null);
-      setFormData({ name: '', entity_id: '', columns: [], filter_key: '' });
+      setFormData({ name: '', entity_id: '', columns: [], filter_key: '', is_global: false });
       onRefresh();
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert('Error al guardar la vista personalizada.');
+      alert(`Error al guardar la vista personalizada: ${err.message || 'Error desconocido'}`);
     }
   };
 
@@ -100,7 +103,8 @@ export default function CustomViewManager({ entities, customViews, onRefresh, Em
       name: view.name,
       entity_id: view.entity_id,
       columns: view.columns || [],
-      filter_key: view.filter_key || ''
+      filter_key: view.filter_key || '',
+      is_global: view.is_global || false
     });
     setIsCreating(true);
   };
@@ -113,7 +117,7 @@ export default function CustomViewManager({ entities, customViews, onRefresh, Em
           <div className="flex items-center justify-between mb-8">
             <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Vistas Maestras</h4>
             <button 
-              onClick={() => { setIsCreating(true); setEditingView(null); setFormData({ name: '', entity_id: '', columns: [], filter_key: '' }); }}
+              onClick={() => { setIsCreating(true); setEditingView(null); setFormData({ name: '', entity_id: '', columns: [], filter_key: '', is_global: false }); }}
               className="p-3 bg-slate-900 text-white rounded-2xl hover:bg-slate-800 transition-all shadow-lg"
             >
               <Plus size={16} />
@@ -147,9 +151,14 @@ export default function CustomViewManager({ entities, customViews, onRefresh, Em
                 }`}
               >
                 <div>
-                  <h6 className="text-sm font-black italic mb-1">{view.name}</h6>
+                  <div className="flex items-center gap-2 mb-1">
+                    <h6 className="text-sm font-black italic">{view.name}</h6>
+                    {view.is_global && (
+                      <span className="px-1.5 py-0.5 bg-brand-electric text-white text-[7px] font-black rounded uppercase">Global</span>
+                    )}
+                  </div>
                   <p className={`text-[9px] font-black uppercase tracking-widest ${editingView?.id === view.id ? 'text-slate-400' : 'text-slate-300'}`}>
-                    {entities.find(e => e.id === view.entity_id)?.name || 'Tabla no encontrada'}
+                    {entities.find(e => e.id === view.entity_id)?.name || view.entity_name || 'Tabla no encontrada'}
                   </p>
                 </div>
                 <ChevronRight size={16} className={editingView?.id === view.id ? 'text-[#0C1E4F]' : 'text-slate-200'} />
@@ -222,6 +231,23 @@ export default function CustomViewManager({ entities, customViews, onRefresh, Em
                   </select>
                   <p className="text-[9px] text-slate-400 mt-3 italic font-medium px-1">
                     Idealmente CWP o EDT para que se sincronice automáticamente con el dashboard.
+                  </p>
+                </div>
+
+                <div className="pt-4 border-t border-slate-50">
+                  <label className="flex items-center gap-3 cursor-pointer group">
+                    <div 
+                      onClick={() => setFormData(f => ({ ...f, is_global: !f.is_global }))}
+                      className={`w-10 h-5 rounded-full relative transition-all ${formData.is_global ? 'bg-brand-electric' : 'bg-slate-200'}`}
+                    >
+                      <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${formData.is_global ? 'left-6' : 'left-1'}`} />
+                    </div>
+                    <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest group-hover:text-brand-electric transition-colors">
+                      Vista Global (Transversal entre proyectos)
+                    </span>
+                  </label>
+                  <p className="text-[9px] text-slate-400 mt-2 italic pl-13">
+                    Si se marca como global, la vista aparecerá en todos los proyectos y buscará una tabla con el mismo nombre.
                   </p>
                 </div>
               </div>

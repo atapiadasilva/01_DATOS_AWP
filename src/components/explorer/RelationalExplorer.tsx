@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Database, Plus, X, ChevronRight, Layers, Search, ArrowRight, Check, Loader2, Download, Save, Tag, Filter } from 'lucide-react';
+import { Database, Plus, X, ChevronRight, Layers, Search, ArrowRight, Check, Loader2, Download, Save, Tag, Filter, GitBranch, Sparkles, Package, RefreshCw, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import * as XLSX from 'xlsx';
 import { useCwpFilter } from '@/hooks/useCwpFilter';
+import { useSourceOfTruth, type SOTMapping } from '@/hooks/useSourceOfTruth';
 import type { EntityWithAttributes, RelationshipWithAttrs } from '@/types';
 
 interface RelationalExplorerProps {
@@ -39,6 +40,26 @@ export default function RelationalExplorer({ entities, relationships, onRefresh 
   const [saveViewName, setSaveViewName] = useState('');
   const [isSavingView, setIsSavingView] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  
+  // ─── Fuente de Verdad (SOT) ─────────────────────────────────────────
+  const projectId = useMemo(() => entities[0]?.project_id, [entities]);
+  const { mappings, saveMapping, deleteMapping, clearAllMappings, resolveMasterField, refreshMappings } = useSourceOfTruth(projectId);
+  const [showSotModal, setShowSotModal] = useState(false);
+  const [isSavingSot, setIsSavingSot] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncCount, setSyncCount] = useState<number | null>(null);
+  const [shouldClearMaster, setShouldClearMaster] = useState(false);
+
+  // Campos maestros a configurar
+  const MASTER_FIELDS = [
+    { key: 'cwp', label: 'CWP (Código)', icon: <Tag size={12} /> },
+    { key: 'description', label: 'Descripción CWP', icon: <Search size={12} /> },
+    { key: 'discipline', label: 'Disciplina/Especialidad', icon: <Layers size={12} /> },
+    { key: 'ewp', label: 'EWP', icon: <Package size={12} /> },
+    { key: 'pwp', label: 'PWP', icon: <Database size={12} /> },
+    { key: 'area', label: 'Área/Sector', icon: <Filter size={12} /> },
+    { key: 'tags', label: 'Tags/Comentarios', icon: <Sparkles size={12} /> },
+  ];
 
   // ─── Carga paginada ──────────────────────────────────────────────────
   const fetchAllRecords = async (entityId: string) => {
@@ -147,35 +168,68 @@ export default function RelationalExplorer({ entities, relationships, onRefresh 
     setSelectedBaseColumns(prev => prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col]);
   };
 
-  // ─── JOIN con Maps ───────────────────────────────────────────────────
+  // ─── JOIN con Multi-Match (1:N) ───────────────────────────────────
   const joinedRows = useMemo(() => {
-    const indexes: Record<string, Map<string, any>> = {};
-    selectedExtraColumns.forEach(({ entityId }) => {
-      if (indexes[entityId]) return;
+    // 1. Agrupar columnas seleccionadas por entidad para procesarlas en bloque
+    const columnsByEntity: Record<string, string[]> = {};
+    selectedExtraColumns.forEach(({ entityId, column }) => {
+      if (!columnsByEntity[entityId]) columnsByEntity[entityId] = [];
+      if (!columnsByEntity[entityId].includes(column)) columnsByEntity[entityId].push(column);
+    });
+
+    // 2. Pre-indexar datos de entidades relacionadas (Map de array de filas)
+    const indexes: Record<string, Map<string, any[]>> = {};
+    Object.keys(columnsByEntity).forEach(entityId => {
       const rel = reachableEntities.find(r => r.entity.id === entityId);
       if (!rel) return;
+      
       const { childCol } = rel.joinKey;
       const data = relatedEntityData[entityId] || [];
-      const map = new Map();
+      const map = new Map<string, any[]>();
+      
       data.forEach(row => {
         const val = String(row[childCol] ?? '').trim().toLowerCase();
-        if (val) map.set(val, row);
+        if (val) {
+          if (!map.has(val)) map.set(val, []);
+          map.get(val)!.push(row);
+        }
       });
       indexes[entityId] = map;
     });
 
-    return baseData.map(baseRow => {
-      const merged: any = { ...baseRow };
-      selectedExtraColumns.forEach(({ entityId, column }) => {
-        const rel = reachableEntities.find(r => r.entity.id === entityId);
-        if (!rel) return;
-        const { parentCol } = rel.joinKey;
-        const joinVal = String(baseRow[parentCol] ?? '').trim().toLowerCase();
-        const matchRow = indexes[entityId]?.get(joinVal);
-        merged[`${entityId}::${column}`] = matchRow?.[column] ?? '—';
+    // 3. Expandir filas iterativamente por cada entidad relacionada
+    let result = baseData.map(row => ({ ...row }));
+
+    Object.entries(columnsByEntity).forEach(([entityId, cols]) => {
+      const rel = reachableEntities.find(r => r.entity.id === entityId);
+      if (!rel) return;
+      
+      const { parentCol } = rel.joinKey;
+      const index = indexes[entityId];
+
+      result = result.flatMap(row => {
+        const joinVal = String(row[parentCol] ?? '').trim().toLowerCase();
+        const matches = index?.get(joinVal) || [];
+
+        if (matches.length === 0) {
+          // Mantener la fila pero con valores vacíos para las columnas de esta entidad
+          const nullRow = { ...row };
+          cols.forEach(c => { nullRow[`${entityId}::${c}`] = '—'; });
+          return [nullRow];
+        }
+
+        // Crear una fila por cada coincidencia
+        return matches.map(matchRow => {
+          const expandedRow = { ...row };
+          cols.forEach(c => {
+            expandedRow[`${entityId}::${c}`] = matchRow[c] ?? '—';
+          });
+          return expandedRow;
+        });
       });
-      return merged;
     });
+
+    return result;
   }, [baseData, selectedExtraColumns, relatedEntityData, reachableEntities]);
 
   // ─── CWP column detection ────────────────────────────────────────────
@@ -245,6 +299,105 @@ export default function RelationalExplorer({ entities, relationships, onRefresh 
     }
   };
 
+  // ─── Sincronizar con CWP Master ──────────────────────────────────────
+  const handleSyncToMaster = async () => {
+    if (!projectId) { alert('No se ha detectado el ID del proyecto.'); return; }
+    if (joinedRows.length === 0) { alert('No hay datos en la tabla para sincronizar.'); return; }
+    setIsSyncing(true);
+    try {
+      // 0. Si se solicita limpiar, borrar todo lo anterior
+      if (shouldClearMaster) {
+        const { error: delError } = await supabase
+          .from('cwp_master')
+          .delete()
+          .eq('project_id', projectId);
+        if (delError) throw delError;
+      }
+
+      // 1. Obtener los mapeos actuales
+      const mapCwp = mappings.find(m => m.master_key === 'cwp');
+      if (!mapCwp) { alert('Debes mapear al menos la columna CWP.'); return; }
+
+      const mapDesc = mappings.find(m => m.master_key === 'description');
+      const mapDisc = mappings.find(m => m.master_key === 'discipline');
+      const mapEwp  = mappings.find(m => m.master_key === 'ewp');
+      const mapPwp  = mappings.find(m => m.master_key === 'pwp');
+      const mapArea = mappings.find(m => m.master_key === 'area');
+      const mapTags = mappings.find(m => m.master_key === 'tags');
+
+      const getVal = (row: any, m: SOTMapping | undefined) => {
+        if (!m) return '';
+        const colKey = m.source_entity_id === baseEntityId ? m.source_attribute_name : `${m.source_entity_id}::${m.source_attribute_name}`;
+        return row[colKey] || '';
+      };
+
+      // 2. Agrupar filas por CWP para extraer resúmenes/conteos
+      const cwpGroups = new Map<string, any>();
+      
+      joinedRows.forEach(row => {
+        const code = String(getVal(row, mapCwp)).trim().toUpperCase();
+        if (!code || code === '—' || code === 'UNDEFINED') return;
+        
+        if (!cwpGroups.has(code)) {
+          cwpGroups.set(code, {
+            description: new Set(),
+            discipline: new Set(),
+            ewp: new Set(),
+            pwp: new Set(),
+            area: new Set(),
+            tags: new Set(),
+            count: 0
+          });
+        }
+        
+        const group = cwpGroups.get(code);
+        group.count++;
+        const d = String(getVal(row, mapDesc) || '').trim(); if (d && d !== '—') group.description.add(d);
+        const di = String(getVal(row, mapDisc) || '').trim(); if (di && di !== '—') group.discipline.add(di);
+        const ew = String(getVal(row, mapEwp) || '').trim(); if (ew && ew !== '—') group.ewp.add(ew);
+        const pw = String(getVal(row, mapPwp) || '').trim(); if (pw && pw !== '—') group.pwp.add(pw);
+        const ar = String(getVal(row, mapArea) || '').trim(); if (ar && ar !== '—') group.area.add(ar);
+        const tg = String(getVal(row, mapTags) || '').trim(); if (tg && tg !== '—') group.tags.add(tg);
+      });
+
+      // 3. Crear las filas finales para el Catálogo Maestro
+      const rows = Array.from(cwpGroups.entries()).map(([code, g]) => {
+        const smartLabel = (set: Set<string>, singleLabel: string, multiLabel: string) => {
+          const size = set.size;
+          if (size === 0) return `Sin ${singleLabel.toLowerCase()}`;
+          if (size === 1) return Array.from(set)[0];
+          return `${size} ${multiLabel}`;
+        };
+
+        return {
+          project_id: projectId,
+          cwp_code: code,
+          cwp_description: smartLabel(g.description, 'Desc.', 'Descripciones'),
+          discipline: smartLabel(g.discipline, 'Esp.', 'Especialidades'),
+          ewp_code: smartLabel(g.ewp, 'EWP', 'EWPs'),
+          pwp_code: smartLabel(g.pwp, 'PWP', 'PWPs'),
+          area: smartLabel(g.area, 'Área', 'Áreas'),
+          tags: g.tags.size === 0 ? `0 registros` : (g.tags.size === 1 ? Array.from(g.tags)[0] : `${g.tags.size} TAGS`),
+          is_active: true
+        };
+      });
+
+      console.log('Sincronizando CWPs agregados:', rows.length, rows);
+      
+      const { error } = await supabase.from('cwp_master').upsert(rows, { onConflict: 'project_id,cwp_code' });
+      if (error) throw error;
+
+      alert(`¡Sincronización exitosa! Se han procesado ${rows.length} CWPs únicos con sus respectivos conteos.`);
+      setSyncCount(rows.length);
+      setTimeout(() => setSyncCount(null), 3000);
+    } catch (err: any) {
+      console.error(err);
+      alert(`Error al sincronizar con el Maestro CWP: ${err.message || JSON.stringify(err)}`);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const handleExportExcel = () => {
     if (filteredJoinedRows.length === 0) return;
     const exportData = filteredJoinedRows.map(row => {
@@ -266,10 +419,28 @@ export default function RelationalExplorer({ entities, relationships, onRefresh 
   ];
 
   const getColumnLabel = (col: string) => {
-    if (!col.includes('::')) return col;
-    const [entityId, column] = col.split('::');
-    const ent = entities.find(e => e.id === entityId);
-    return `${ent?.name?.slice(0, 12) ?? '?'} › ${column}`;
+    let baseLabel = '';
+    let entityId = '';
+    let column = '';
+
+    if (!col.includes('::')) {
+      baseLabel = col;
+      entityId = baseEntityId;
+      column = col;
+    } else {
+      const [eid, c] = col.split('::');
+      entityId = eid;
+      column = c;
+      const ent = entities.find(e => e.id === eid);
+      baseLabel = `${ent?.name?.slice(0, 12) ?? '?'} › ${c}`;
+    }
+
+    const masterKey = resolveMasterField(entityId, column);
+    if (masterKey) {
+      const field = MASTER_FIELDS.find(f => f.key === masterKey);
+      return `${field?.label.split(' ')[0]} | ${baseLabel}`;
+    }
+    return baseLabel;
   };
 
   const getColumnColor = (col: string) => {
@@ -511,6 +682,16 @@ export default function RelationalExplorer({ entities, relationships, onRefresh 
                 </button>
               )}
 
+              {/* Configurar Matriz de la Verdad */}
+              {allDisplayColumns.length > 0 && (
+                <button
+                  onClick={() => setShowSotModal(true)}
+                  className="px-4 py-2 bg-brand-deep text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 hover:bg-brand-deep/80 border border-brand-deep transition-all shadow-sm"
+                >
+                  <GitBranch size={13} /> Matriz de la Verdad
+                </button>
+              )}
+
               {/* Exportar */}
               {filteredJoinedRows.length > 0 && (
                 <button
@@ -586,52 +767,122 @@ export default function RelationalExplorer({ entities, relationships, onRefresh 
         </div>
       </div>
 
-      {/* ─── MODAL: Guardar como Vista ─── */}
-      {showSaveModal && (
+      {/* ─── MODAL: Matriz de la Verdad ─── */}
+      {showSotModal && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
-          <div className="bg-white rounded-[2.5rem] shadow-2xl p-10 w-full max-w-md space-y-6">
+          <div className="bg-white rounded-[2.5rem] shadow-2xl p-10 w-full max-w-2xl space-y-6">
             <div className="flex items-center justify-between">
-              <h3 className="text-xl font-black italic text-slate-900">Guardar como Vista</h3>
-              <button onClick={() => setShowSaveModal(false)} className="text-slate-300 hover:text-slate-600">
+              <div>
+                <h3 className="text-xl font-black italic text-slate-900 flex items-center gap-2">
+                  <GitBranch className="text-brand-electric" /> Matriz de la Verdad
+                </h3>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Configuración de Parámetros Maestros</p>
+              </div>
+              <button onClick={() => setShowSotModal(false)} className="text-slate-300 hover:text-slate-600">
                 <X size={20} />
               </button>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Nombre de la Vista</label>
-                <input
-                  type="text"
-                  value={saveViewName}
-                  onChange={e => setSaveViewName(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleSaveAsView()}
-                  placeholder="Ej: Programa General, Log de Planos..."
-                  autoFocus
-                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:border-brand-electric transition-all"
-                />
-              </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[60vh] overflow-y-auto pr-2">
+              {MASTER_FIELDS.map(field => {
+                const currentMapping = mappings.find(m => m.master_key === field.key);
+                return (
+                  <div key={field.key} className="p-5 bg-slate-50 rounded-[2rem] border border-slate-100 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-brand-deep">
+                        {field.icon}
+                        <span className="text-[10px] font-black uppercase tracking-widest">{field.label}</span>
+                      </div>
+                      {currentMapping && (
+                        <button 
+                          onClick={() => deleteMapping(field.key)}
+                          className="p-1.5 text-slate-300 hover:text-red-400 hover:bg-red-50 rounded-lg transition-all"
+                          title="Eliminar mapeo"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      )}
+                    </div>
 
-              <div className="p-4 bg-slate-50 rounded-2xl space-y-1.5">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Configuración detectada</p>
-                <p className="text-[11px] font-bold text-slate-600">Tabla base: <span className="text-slate-900">{baseEntity?.name}</span></p>
-                <p className="text-[11px] font-bold text-slate-600">Columnas: <span className="text-slate-900">{selectedBaseColumns.length} seleccionadas</span></p>
-                {cwpColumn && <p className="text-[11px] font-bold text-[#0C1E4F]">Filtro CWP detectado: <span className="font-black">{cwpColumn}</span></p>}
-              </div>
+                    <select
+                      className="w-full p-3 bg-white border border-slate-100 rounded-xl text-[11px] font-bold outline-none focus:border-brand-electric"
+                      value={currentMapping ? (currentMapping.source_entity_id === baseEntityId ? currentMapping.source_attribute_name : `${currentMapping.source_entity_id}::${currentMapping.source_attribute_name}`) : ''}
+                      onChange={async (e) => {
+                        const val = e.target.value;
+                        if (!val) return;
+                        let eid = baseEntityId;
+                        let col = val;
+                        if (val.includes('::')) {
+                          [eid, col] = val.split('::');
+                        }
+                        setIsSavingSot(true);
+                        await saveMapping(field.key, eid, col);
+                        setIsSavingSot(false);
+                      }}
+                    >
+                      <option value="">No mapeado...</option>
+                      {allDisplayColumns.map(col => (
+                        <option key={col} value={col}>{getColumnLabel(col)}</option>
+                      ))}
+                    </select>
+
+                    {currentMapping && (
+                      <p className="text-[9px] text-brand-electric font-black flex items-center gap-1">
+                        <Check size={9} /> Vinculado a {getColumnLabel(currentMapping.source_entity_id === baseEntityId ? currentMapping.source_attribute_name : `${currentMapping.source_entity_id}::${currentMapping.source_attribute_name}`)}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
-            <div className="flex gap-3">
-              <button onClick={() => setShowSaveModal(false)} className="flex-1 py-3 text-slate-400 font-black text-[10px] uppercase tracking-widest">
-                Cancelar
-              </button>
-              <button
-                onClick={handleSaveAsView}
-                disabled={!saveViewName.trim() || isSavingView || saveSuccess}
-                className={`flex-1 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${
-                  saveSuccess ? 'bg-[#0C1E4F] text-white' : 'bg-slate-900 text-white hover:bg-slate-800'
-                } disabled:opacity-50`}
-              >
-                {saveSuccess ? <><Check size={14} /> Guardada</> : isSavingView ? <Loader2 className="animate-spin" size={14} /> : <><Save size={14} /> Guardar</>}
-              </button>
+            <div className="bg-blue-50 p-6 rounded-[2rem] border border-blue-100">
+              <p className="text-[10px] font-bold text-blue-700 leading-relaxed italic">
+                <Sparkles size={12} className="inline mr-1 mb-1" />
+                Los campos que definas aquí se convertirán en la "Fuente de la Verdad" del proyecto. Todas las vistas dinámicas, reportes y tableros usarán estos mapeos automáticamente para identificar el CWP, la Especialidad y otros parámetros clave.
+              </p>
+            </div>
+
+            <div className="flex justify-between items-center gap-3">
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={handleSyncToMaster}
+                  disabled={isSyncing || !mappings.some(m => m.master_key === 'cwp')}
+                  className={`px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${
+                    syncCount ? 'bg-green-500 text-white' : 'bg-brand-electric text-white hover:bg-brand-electric/80 shadow-lg shadow-brand-electric/20'
+                  } disabled:opacity-30`}
+                >
+                  {isSyncing ? <Loader2 size={14} className="animate-spin" /> : syncCount ? <><Check size={14} /> {syncCount} Sincronizados</> : <><RefreshCw size={14} /> Sincronizar catálogo maestro</>}
+                </button>
+                <label className="flex items-center gap-2 cursor-pointer group">
+                  <input 
+                    type="checkbox" 
+                    checked={shouldClearMaster}
+                    onChange={e => setShouldClearMaster(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded border-slate-300 text-brand-electric focus:ring-brand-electric"
+                  />
+                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter group-hover:text-slate-600">Limpiar registros anteriores antes de sincronizar</span>
+                </label>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={async () => {
+                    if (confirm('¿Estás seguro de que quieres limpiar todos los mapeos de esta matriz?')) {
+                      await clearAllMappings();
+                    }
+                  }}
+                  className="px-6 py-3 text-slate-400 hover:text-red-400 font-black text-[10px] uppercase tracking-widest transition-all flex items-center gap-2"
+                >
+                  <Trash2 size={14} /> Reset Matriz
+                </button>
+                <button
+                  onClick={() => setShowSotModal(false)}
+                  className="px-8 py-3 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center gap-2 shadow-xl"
+                >
+                  {isSavingSot ? <Loader2 size={14} className="animate-spin" /> : <><Check size={14} /> Finalizar</>}
+                </button>
+              </div>
             </div>
           </div>
         </div>

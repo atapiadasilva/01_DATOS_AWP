@@ -2,14 +2,24 @@
 
 import React, { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { Loader2, Box, AlertCircle, RefreshCw } from 'lucide-react';
+import { useProject } from '@/contexts/ProjectContext';
 
 declare global { interface Window { Autodesk: any; THREE: any } }
 
 export interface ElementColor { externalId: string; hex: string; alpha?: number }
 
 // API exposed to parent via ref
+export interface TreeNodeInfo {
+  id:          number;
+  name:        string;
+  hasChildren: boolean;
+  childCount:  number;
+}
+
 export interface APSViewer4DHandle {
-  zoomToElements: (externalIds: string[]) => void;
+  zoomToElements:   (externalIds: string[]) => void;
+  isolateByNodeId:  (nodeId: number | null) => void;
+  getNodeChildren:  (nodeId: number | null) => TreeNodeInfo[]; // null = raíz
 }
 
 function hexToVec4(hex: string, alpha = 0.85): any {
@@ -25,27 +35,31 @@ function hexToVec4(hex: string, alpha = 0.85): any {
 
 
 interface APSViewer4DProps {
-  onSelectionChange?: (externalIds: string[]) => void;
-  onModelUrnReady?:   (urn: string) => void;
-  elementColors?:     ElementColor[];
-  doneIds?:           string[];
-  globalGrey?:        boolean;
-  selection?:         string[];
-  disciplineFilter?:  string;
-  /** ExternalIds to hard-isolate (from linked activities of the filtered discipline) */
-  isolateIds?:        string[];
+  onSelectionChange?:  (externalIds: string[]) => void;
+  onModelUrnReady?:    (urn: string) => void;
+  onModelTreeReady?:   (nodes: { id: number; name: string }[]) => void;
+  elementColors?:      ElementColor[];
+  doneIds?:            string[];
+  globalGrey?:         boolean;
+  selection?:          string[];
+  /** Node IDs from the model tree to hard-filter (persistent, survives element clicks) */
+  nodeFilterIds?:      number[];
+  /** External IDs that should be hidden (viewer.hide) regardless of isolation state */
+  hiddenIds?:          string[];
 }
 
 const APSViewer4D = forwardRef<APSViewer4DHandle, APSViewer4DProps>(function APSViewer4D({
   onSelectionChange,
   onModelUrnReady,
+  onModelTreeReady,
   elementColors,
   doneIds,
   globalGrey = true,
   selection = [],
-  disciplineFilter = '',
-  isolateIds,
+  nodeFilterIds = [],
+  hiddenIds = [],
 }, ref) {
+  const { currentProject } = useProject();
   const containerRef     = useRef<HTMLDivElement>(null);
   const viewerRef        = useRef<any>(null);
   const extIdToDbIdRef   = useRef<Record<string, number>>({});
@@ -54,28 +68,13 @@ const APSViewer4D = forwardRef<APSViewer4DHandle, APSViewer4DProps>(function APS
   const doneIdsRef       = useRef<string[]>([]);
   const modelLoadedRef   = useRef(false);
   const globalGreyRef    = useRef<boolean>(true);
+  const instanceTreeRef  = useRef<any>(null);
 
   const [sdkReady,    setSdkReady]    = useState(false);
   const [viewerReady, setViewerReady] = useState(false);
   const [status,      setStatus]      = useState('Inicializando Viewer…');
   const [error,       setError]       = useState('');
   const [modelName,   setModelName]   = useState('');
-  const [filterDbIds, setFilterDbIds] = useState<number[] | null>(null);
-
-  // ── Search model for discipline elements ───────────────────────────────────
-  useEffect(() => {
-    const viewer = viewerRef.current;
-    if (!viewer || !modelLoadedRef.current) return;
-    if (!disciplineFilter) { setFilterDbIds(null); return; }
-
-    viewer.search(
-      disciplineFilter,
-      (dbIds: number[]) => setFilterDbIds(dbIds),
-      (err: any) => { console.error('[APS4D] search error:', err); setFilterDbIds([]); },
-      ['Category', 'Family Name', 'Especialidad', 'Discipline', 'System Type'],
-      { exactMatch: false }
-    );
-  }, [disciplineFilter]);
 
   // ── Imperative API exposed to parent ──────────────────────────────────────
   useImperativeHandle(ref, () => ({
@@ -84,8 +83,35 @@ const APSViewer4D = forwardRef<APSViewer4DHandle, APSViewer4DProps>(function APS
       if (!viewer || !modelLoadedRef.current) return;
       const dbIds = externalIds.map(id => extIdToDbIdRef.current[id]).filter((id): id is number => id != null);
       if (!dbIds.length) return;
-      viewer.isolate(dbIds, viewer.model);
+      // Solo zoom — NO isolate: dejar que React gestione la visibilidad vía props
       viewer.fitToView(dbIds, viewer.model);
+    },
+
+    isolateByNodeId(nodeId: number | null) {
+      const viewer = viewerRef.current;
+      if (!viewer || !modelLoadedRef.current) return;
+      if (nodeId === null) { viewer.showAll(); return; }
+      // Recopilar todos los dbIds descendientes del nodo
+      const tree = viewer.model?.getInstanceTree();
+      if (!tree) return;
+      const dbIds: number[] = [];
+      tree.enumNodeChildren(nodeId, (id: number) => { dbIds.push(id); }, true);
+      if (dbIds.length) { viewer.isolate(dbIds, viewer.model); viewer.fitToView(dbIds, viewer.model); }
+    },
+
+    getNodeChildren(nodeId: number | null): TreeNodeInfo[] {
+      const tree = instanceTreeRef.current;
+      if (!tree) return [];
+      const parentId = nodeId === null ? tree.getRootId() : nodeId;
+      const result: TreeNodeInfo[] = [];
+      tree.enumNodeChildren(parentId, (childId: number) => {
+        const name = tree.getNodeName(childId);
+        if (!name) return;
+        let childCount = 0;
+        tree.enumNodeChildren(childId, () => { childCount++; }, false);
+        result.push({ id: childId, name, hasChildren: childCount > 0, childCount });
+      }, false);
+      return result;
     },
   }), []);
 
@@ -117,39 +143,46 @@ const APSViewer4D = forwardRef<APSViewer4DHandle, APSViewer4DProps>(function APS
       .map(id => extIdToDbIdRef.current[id])
       .filter((id): id is number => id != null);
 
-    // Resolve isolateIds (externalIds from parent) → dbIds: most reliable discipline filter
-    const isolateDbIds = isolateIds
-      ? isolateIds.map(id => extIdToDbIdRef.current[id]).filter((id): id is number => id != null)
-      : null;
-
-    // Visibility logic (priority: isolateIds > filterDbIds from search > globalGrey)
-    let visibleDbIds: number[] = [];
-
-    const disciplineDbIds = isolateDbIds ?? filterDbIds; // prefer explicit ids over search results
-
-    if (disciplineDbIds !== null) {
-      // Discipline filter active: show only those elements
-      if (globalGrey) {
-        // Intersect with assigned elements so unlinked geometry is still ghosted
-        const assignedSet = new Set([...coloredDbIds, ...doneDbIds]);
-        const intersection = disciplineDbIds.filter(id => assignedSet.has(id));
-        visibleDbIds = intersection.length > 0 ? intersection : disciplineDbIds;
-      } else {
-        visibleDbIds = disciplineDbIds;
-      }
-    } else {
-      // No discipline filter — normal 4D behavior
-      if (globalGrey) {
-        const assigned = [...coloredDbIds, ...doneDbIds];
-        visibleDbIds = assigned.length > 0 ? assigned : [-1];
-      } else {
-        viewer.showAll();
-        visibleDbIds = [];
+    // ── Nodo-filtro: recolectar dbIds de todos los nodos seleccionados ────────
+    // Este filtro SIEMPRE persiste — no lo borra ningún click ni cambio de estado
+    let nodeDbIds: number[] | null = null;
+    if (nodeFilterIds.length > 0) {
+      const tree = viewer.model?.getInstanceTree();
+      if (tree) {
+        const ids: number[] = [];
+        nodeFilterIds.forEach(nodeId => {
+          tree.enumNodeChildren(nodeId, (id: number) => ids.push(id), true);
+        });
+        nodeDbIds = ids.length > 0 ? ids : null;
       }
     }
 
-    if (visibleDbIds.length > 0 || (filterDbIds !== null && visibleDbIds.length === 0)) {
-      viewer.isolate(visibleDbIds.length > 0 ? visibleDbIds : [-1], viewer.model);
+    // ── Lógica de visibilidad ─────────────────────────────────────────────────
+    // Prioridad: nodeFilter > globalGrey
+    // Si hay filtro de nodo: SIEMPRE mostrar solo esos elementos (el filtro manda)
+    // Si no hay filtro: comportamiento 4D normal
+    let visibleDbIds: number[] = [];
+
+    if (nodeDbIds !== null) {
+      // Filtro activo → mostrar todos los elementos del nodo seleccionado
+      // Si globalGrey: además aislar solo los asignados dentro del nodo
+      if (globalGrey) {
+        const assignedSet = new Set([...coloredDbIds, ...doneDbIds]);
+        const intersection = nodeDbIds.filter(id => assignedSet.has(id));
+        visibleDbIds = intersection.length > 0 ? intersection : nodeDbIds;
+      } else {
+        visibleDbIds = nodeDbIds; // mostrar todo el nodo, colores encima
+      }
+      viewer.isolate(visibleDbIds, viewer.model);
+    } else {
+      // Sin filtro — comportamiento 4D normal
+      if (globalGrey) {
+        const assigned = [...coloredDbIds, ...doneDbIds];
+        visibleDbIds = assigned.length > 0 ? assigned : [-1];
+        viewer.isolate(visibleDbIds, viewer.model);
+      } else {
+        viewer.showAll();
+      }
     }
 
     viewer.clearThemingColors();
@@ -158,8 +191,15 @@ const APSViewer4D = forwardRef<APSViewer4DHandle, APSViewer4DProps>(function APS
       if (dbId == null) continue;
       viewer.setThemingColor(dbId, hexToVec4(hex, alpha ?? 0.95), viewer.model, true);
     }
+
+    // Ocultar elementos marcados por el usuario (sobrevive a isolate/showAll)
+    const hiddenDbIds = hiddenIds
+      .map(id => extIdToDbIdRef.current[id])
+      .filter((id): id is number => id != null);
+    if (hiddenDbIds.length > 0) viewer.hide(hiddenDbIds, viewer.model);
+
     viewer.impl?.invalidate(true);
-  }, [elementColors, doneIds, globalGrey, filterDbIds, isolateIds]);
+  }, [elementColors, doneIds, globalGrey, nodeFilterIds, hiddenIds]);
 
   // Load APS SDK
   useEffect(() => {
@@ -210,6 +250,43 @@ const APSViewer4D = forwardRef<APSViewer4DHandle, APSViewer4DProps>(function APS
           }
         );
         viewer.addEventListener(
+          window.Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT,
+          () => {
+            const tree = viewer.model?.getInstanceTree();
+            if (!tree) return;
+            instanceTreeRef.current = tree;
+            if (!onModelTreeReady) return;
+
+            // Recopilar hijos directos de un nodo dado
+            const getChildren = (parentId: number): { id: number; name: string }[] => {
+              const result: { id: number; name: string }[] = [];
+              tree.enumNodeChildren(parentId, (childId: number) => {
+                const name = tree.getNodeName(childId);
+                if (name) result.push({ id: childId, name });
+              }, false);
+              return result;
+            };
+
+            // El árbol de Navisworks suele tener: Root → Carpeta ("Disciplina") → archivos.nwc/nwd
+            // Si el primer nivel tiene pocos nodos (carpetas), bajamos un nivel más
+            // para obtener los archivos reales.
+            const rootId   = tree.getRootId();
+            let nodes      = getChildren(rootId);
+
+            // Si todos los hijos parecen carpetas (sin extensión) bajamos un nivel
+            const areFolders = nodes.every(n => !n.name.includes('.'));
+            if (areFolders && nodes.length > 0) {
+              // Tomar los hijos de TODOS los nodos-carpeta del primer nivel
+              const deep: { id: number; name: string }[] = [];
+              nodes.forEach(folder => deep.push(...getChildren(folder.id)));
+              if (deep.length > 0) nodes = deep;
+            }
+
+            if (nodes.length) onModelTreeReady(nodes);
+          }
+        );
+
+        viewer.addEventListener(
           window.Autodesk.Viewing.GEOMETRY_LOADED_EVENT,
           () => {
             viewer.model?.getExternalIdMapping((extMap: Record<string, number>) => {
@@ -250,13 +327,16 @@ const APSViewer4D = forwardRef<APSViewer4DHandle, APSViewer4DProps>(function APS
         viewerRef.current = null;
       }
     };
-  }, [sdkReady]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sdkReady]);
 
   const loadModel = useCallback(async (viewer: any) => {
-    setStatus('Buscando modelo…');
+    setStatus('Buscando modelo del proyecto…');
     setError('');
     try {
-      const r = await fetch('/api/aps/default-model');
+      const url = currentProject?.id 
+        ? `/api/aps/default-model?projectId=${currentProject.id}`
+        : '/api/aps/default-model';
+      const r = await fetch(url);
       if (!r.ok) { setError((await r.json()).error ?? 'Modelo no encontrado'); setStatus(''); return; }
       const { urn, name } = await r.json();
       onModelUrnReady?.(urn);
@@ -268,7 +348,14 @@ const APSViewer4D = forwardRef<APSViewer4DHandle, APSViewer4DProps>(function APS
         (code: number, msg: string) => { setError(`Error (${code}): ${msg}`); setStatus(''); }
       );
     } catch (e: any) { setError(`Error: ${e.message}`); setStatus(''); }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentProject?.id, onModelUrnReady]);
+
+  // Re-cargar modelo cuando cambia el proyecto
+  useEffect(() => {
+    if (viewerRef.current && currentProject?.id) {
+      loadModel(viewerRef.current);
+    }
+  }, [currentProject?.id, loadModel]);
 
   return (
     <div className="relative w-full h-full overflow-hidden bg-slate-900">

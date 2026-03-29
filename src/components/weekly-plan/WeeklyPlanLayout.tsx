@@ -8,7 +8,7 @@ import {
   GripHorizontal, CalendarDays, Loader2, Check, X,
   Play, Pause, SkipBack, Ghost, Calendar, Palette, Maximize2,
 } from 'lucide-react';
-import APSViewer4D, { type APSViewer4DHandle } from '@/components/viewer3d/APSViewer4D';
+import APSViewer4D, { type APSViewer4DHandle, type TreeNodeInfo } from '@/components/viewer3d/APSViewer4D';
 import { useProject } from '@/contexts/ProjectContext';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -140,9 +140,16 @@ export default function WeeklyPlanLayout() {
   const [multiSelect, setMultiSelect] = useState(false);
   const [editDraft,   setEditDraft]   = useState<Partial<Activity> | null>(null);
   const [isNew,       setIsNew]       = useState(false);
-  const [discFilter,  setDiscFilter]  = useState<string>(''); // filtro disciplina: lista + viewer
+  const [discFilter,    setDiscFilter]    = useState<string>('');
+  const [treeNodes,     setTreeNodes]     = useState<{ id: number; name: string }[]>([]);
+  const [filterNodeIds, setFilterNodeIds] = useState<Set<number>>(new Set()); // nodos del árbol seleccionados
+  const [showNodePanel, setShowNodePanel] = useState(false); // toggle del panel de checkboxes
+  const [treeNavPath,   setTreeNavPath]   = useState<{ id: number; name: string }[]>([]); // breadcrumb
+  const [treeNavNodes,  setTreeNavNodes]  = useState<TreeNodeInfo[]>([]); // nodos en nivel actual
   const [draggedId,   setDraggedId]   = useState<string | null>(null);
-  const [showColors,     setShowColors]     = useState(true);
+  const [showAssigned,   setShowAssigned]   = useState(true);  // colorear vinculados en verde
+  const [isolateAssigned, setIsolateAssigned] = useState(false); // aislar: mostrar solo vinculados
+  const [hiddenIds,      setHiddenIds]      = useState<string[]>([]); // elementos ocultos manualmente
   const [dirtyIds,       setDirtyIds]       = useState<Set<string>>(new Set());
   const [collapsedDiscs, setCollapsedDiscs] = useState<Set<string>>(new Set());
 
@@ -153,10 +160,11 @@ export default function WeeklyPlanLayout() {
   const [chipSel,      setChipSel]      = useState<string | null>(null); // chip clicked → select in viewer
   const [showChips,    setShowChips]    = useState(false);              // toggle chip panel
   const [pendingRemove, setPendingRemove] = useState<Set<string>>(new Set()); // marked for removal
-  const basketRef     = useRef<string[]>([]);               // always-fresh basket for linkElements
-  const activitiesRef = useRef<Activity[]>([]);             // always-fresh ref for drag save
-  const linkedSetRef  = useRef<Set<string>>(new Set());     // always-fresh for handleViewerSelection
-  const viewerApiRef  = useRef<APSViewer4DHandle>(null);    // imperative viewer API
+  const basketRef      = useRef<string[]>([]);               // always-fresh basket for linkElements
+  const activitiesRef  = useRef<Activity[]>([]);             // always-fresh ref for drag save
+  const linkedSetRef   = useRef<Set<string>>(new Set());     // always-fresh for handleViewerSelection
+  const multiSelectRef = useRef<boolean>(false);             // always-fresh for handleViewerSelection
+  const viewerApiRef   = useRef<APSViewer4DHandle>(null);    // imperative viewer API
 
   // 3-week window
   const [weekStart, setWeekStart] = useState<Date>(() => prevMonday(new Date()));
@@ -213,15 +221,19 @@ export default function WeeklyPlanLayout() {
       .then(d => { if (d && typeof d === 'object') setLinks(d); });
   }, [currentProject?.id, modelUrn]);
 
-  // ── Viewer selection → accumulate in basket ────────────────────────────────
-  // Each APS click fires onSelectionChange with ONLY the clicked element(s).
-  // We merge into the basket so multiple clicks accumulate.
-  // Clicking empty space (extIds=[]) keeps the basket intact.
+  // ── Viewer selection → basket ─────────────────────────────────────────────
+  // Multi OFF: cada click REEMPLAZA el basket (solo el último queda naranja)
+  // Multi ON:  cada click ACUMULA en el basket
+  // Clic en espacio vacío (extIds=[]) no toca el basket en ningún modo
   const handleViewerSelection = useCallback((extIds: string[]) => {
     setViewerSel(extIds);
     if (extIds.length > 0) {
-      setBasket(prev => Array.from(new Set([...prev, ...extIds])));
-      // Bidireccional: si el elemento clickeado está vinculado a la actividad seleccionada → resalta su chip
+      if (multiSelectRef.current) {
+        setBasket(prev => Array.from(new Set([...prev, ...extIds])));
+      } else {
+        setBasket(extIds); // reemplaza: solo el último elemento queda naranja
+      }
+      // Bidireccional: si el elemento clickeado está vinculado → resalta su chip
       const linked = extIds.find(id => linkedSetRef.current.has(id));
       if (linked) { setChipSel(linked); setShowChips(true); }
     }
@@ -445,8 +457,9 @@ export default function WeeklyPlanLayout() {
   const todayOff   = daysBetween(weekStart, today);
 
   // Keep refs always in sync (avoids stale closures in async callbacks)
-  useEffect(() => { activitiesRef.current = activities; }, [activities]);
-  useEffect(() => { basketRef.current = basket; }, [basket]);
+  useEffect(() => { activitiesRef.current  = activities;  }, [activities]);
+  useEffect(() => { basketRef.current      = basket;      }, [basket]);
+  useEffect(() => { multiSelectRef.current = multiSelect; }, [multiSelect]);
 
   const filtered = useMemo(() => activities.filter(a => !discFilter || a.discipline === discFilter), [activities, discFilter]);
   const selected = activities.find(a => a.id === selectedId) ?? null;
@@ -522,6 +535,39 @@ export default function WeeklyPlanLayout() {
     }
   }, [selectedId, linkedSet]);
 
+  // ── Tree navigation ────────────────────────────────────────────────────────
+  const loadTreeNavNodes = useCallback((nodeId: number | null) => {
+    const nodes = viewerApiRef.current?.getNodeChildren(nodeId) ?? [];
+    setTreeNavNodes(nodes);
+  }, []);
+
+  // When model tree arrives, load root-level nav nodes
+  useEffect(() => {
+    if (treeNodes.length > 0) loadTreeNavNodes(null);
+  }, [treeNodes, loadTreeNavNodes]);
+
+  const enterTreeFolder = useCallback((node: TreeNodeInfo) => {
+    setTreeNavPath(p => [...p, { id: node.id, name: node.name }]);
+    loadTreeNavNodes(node.id);
+  }, [loadTreeNavNodes]);
+
+  const goTreeUp = useCallback(() => {
+    setTreeNavPath(p => {
+      const next = p.slice(0, -1);
+      const parentId = next.length > 0 ? next[next.length - 1].id : null;
+      loadTreeNavNodes(parentId);
+      return next;
+    });
+  }, [loadTreeNavNodes]);
+
+  const toggleNodeFilter = useCallback((nodeId: number) => {
+    setFilterNodeIds(prev => {
+      const n = new Set(prev);
+      n.has(nodeId) ? n.delete(nodeId) : n.add(nodeId);
+      return n;
+    });
+  }, []);
+
   // ── Group by discipline ────────────────────────────────────────────────────
   const grouped = useMemo(() => {
     const map = new Map<string, Activity[]>();
@@ -537,15 +583,16 @@ export default function WeeklyPlanLayout() {
   // We consider "Simulation Mode" active if playing, or if the user has scrubbed to a different date than today.
   const isSimMode = playing || Math.abs(currentDate.getTime() - today.getTime()) > 86400000;
 
-  // ExternalIds de actividades de la disciplina filtrada (para aislar en viewer)
-  const discFilteredExtIds = useMemo(() => {
-    if (!discFilter) return null; // null = sin filtro activo
-    const ids: string[] = [];
-    activities.forEach(act => {
-      if (act.discipline === discFilter) ids.push(...(links[act.id] ?? []));
-    });
-    return ids;
-  }, [discFilter, activities, links]);
+
+  // Todos los externalIds vinculados a cualquier actividad (para Ocultar/Aislar)
+  const allAssignedIds = useMemo(() => {
+    const ids = new Set<string>();
+    activities.forEach(act => (links[act.id] ?? []).forEach(id => ids.add(id)));
+    return Array.from(ids);
+  }, [activities, links]);
+
+  const allAssignedSet  = useMemo(() => new Set(allAssignedIds), [allAssignedIds]);
+  const assignedAreHidden = allAssignedIds.length > 0 && allAssignedIds.every(id => hiddenIds.includes(id));
 
   const { elementColors, doneIds } = useMemo(() => {
     // Actividades visibles: si hay filtro solo las de esa disciplina, si no todas
@@ -554,9 +601,11 @@ export default function WeeklyPlanLayout() {
     // 1. Planning Mode
     if (!isSimMode) {
       const colors: ElementColor[] = [];
-      if (showColors) {
+      // Colorear vinculados en verde si showAssigned O isolateAssigned están activos
+      if (showAssigned || isolateAssigned) {
         const inBasket = new Set(basket);
-        if (selectedIds.size > 0 && basket.length === 0) {
+        if (selectedIds.size > 0 && basket.length === 0 && !isolateAssigned) {
+          // Solo la(s) actividad(es) seleccionada(s)
           visibleActs.forEach(act => {
             if (!selectedIds.has(act.id)) return;
             (links[act.id] ?? []).forEach(extId =>
@@ -564,6 +613,7 @@ export default function WeeklyPlanLayout() {
             );
           });
         } else {
+          // Todos los vinculados visibles
           visibleActs.forEach(act => {
             const actLinks = links[act.id] ?? [];
             const isSel = selectedIds.has(act.id);
@@ -597,26 +647,147 @@ export default function WeeklyPlanLayout() {
         actLinks.forEach(extId => colors.push({ externalId: extId, hex, alpha: 0.95 }));
       }
     });
+
+    if (showAssigned || isolateAssigned) {
+      const alreadyColored = new Set([...done, ...colors.map(c => c.externalId)]);
+      visibleActs.forEach(act => {
+        (links[act.id] ?? []).forEach(extId => {
+          if (!alreadyColored.has(extId)) {
+            colors.push({ externalId: extId, hex: '#22c55e', alpha: 0.4 });
+          }
+        });
+      });
+    }
+
+    basket.forEach(extId => {
+      const idx = colors.findIndex(c => c.externalId === extId);
+      const entry: ElementColor = { externalId: extId, hex: '#f59e0b', alpha: 0.98 };
+      if (idx >= 0) colors[idx] = entry;
+      else colors.push(entry);
+    });
+
     return { elementColors: colors, doneIds: done };
-  }, [activities, links, currentDate, selectedId, selectedIds, isSimMode, weekStart, showColors, basket, discFilter]);
+  }, [activities, links, currentDate, selectedId, selectedIds, isSimMode, weekStart, showAssigned, isolateAssigned, basket, discFilter]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div ref={containerRef} className="flex flex-col w-full flex-1 min-h-0 overflow-hidden rounded-xl border border-slate-200 shadow-sm bg-slate-900">
 
-      {/* ── 3D Viewer ─────────────────────────────────────────────────────── */}
-      <div className="shrink-0 overflow-hidden" style={{ height: panelMin ? 'calc(100% - 36px)' : `${viewerPct}%` }}>
-        <APSViewer4D
-          ref={viewerApiRef}
-          onModelUrnReady={setModelUrn}
-          onSelectionChange={handleViewerSelection}
-          elementColors={elementColors}
-          doneIds={doneIds}
-          globalGrey={isSimMode ? globalGrey : (basket.length === 0 && globalGrey)}
-          selection={chipSel ? [chipSel] : undefined}
-          disciplineFilter={discFilter}
-          isolateIds={discFilteredExtIds ?? undefined}
-        />
+      {/* ── 3D Viewer Area ────────────────────────────────────────────────── */}
+      <div className="shrink-0 overflow-hidden flex flex-row relative" style={{ height: panelMin ? 'calc(100% - 36px)' : `${viewerPct}%` }}>
+
+        {/* Panel lateral de filtros por disciplina (Sidebar) */}
+        {treeNodes.length > 0 && (
+          <div className={`shrink-0 flex flex-col bg-black/40 border-r border-white/10 transition-all duration-300 z-10 relative
+            ${showNodePanel ? 'w-[260px]' : 'w-10'}`}>
+            
+            {/* Header del Panel Lateral */}
+            <div className={`h-10 flex items-center border-b border-white/10 shrink-0 ${showNodePanel ? 'px-3 justify-between' : 'justify-center'}`}>
+              {showNodePanel ? (
+                <>
+                  <div className="flex items-center gap-1.5 text-slate-200 font-bold text-[11px] truncate select-none">
+                    🗂 Filtro Disciplinas
+                    {filterNodeIds.size > 0 && (
+                      <span className="bg-blue-600 px-1.5 py-0.5 rounded text-[9px] text-white ml-1">{filterNodeIds.size}</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {filterNodeIds.size > 0 && (
+                      <button onClick={() => setFilterNodeIds(new Set())} className="text-slate-400 hover:text-red-400 p-1 rounded hover:bg-white/10" title="Limpiar filtros">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    <button onClick={() => setShowNodePanel(false)} className="text-slate-400 hover:text-white p-1 rounded hover:bg-white/10" title="Contraer panel">
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <button
+                  onClick={() => setShowNodePanel(true)}
+                  className="w-full h-full flex flex-col items-center justify-center text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
+                  title="Expandir filtro por disciplinas"
+                >
+                  <div className="relative">
+                    <ChevronRight className="w-4 h-4" />
+                    {filterNodeIds.size > 0 && <span className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full" />}
+                  </div>
+                </button>
+              )}
+            </div>
+
+            {/* Contenido Desplegable (Árbol) */}
+            {showNodePanel && (
+              <div className="flex-1 flex flex-col min-h-0">
+                {/* Header con breadcrumb */}
+                <div className="px-2 py-1.5 bg-black/20 border-b border-white/10 flex items-center gap-1 shrink-0">
+                  {treeNavPath.length > 0 && (
+                    <button onClick={goTreeUp} className="text-slate-400 hover:text-white shrink-0 p-0.5 rounded hover:bg-white/10" title="Subir nivel">
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <span className="text-[10px] font-bold text-slate-300 flex-1 truncate select-none">
+                    {treeNavPath.length > 0 ? treeNavPath[treeNavPath.length - 1].name : 'Estructura Completa'}
+                  </span>
+                </div>
+
+                {/* Nodos del nivel actual */}
+                <div className="flex-1 overflow-y-auto p-1">
+                  {treeNavNodes.length === 0 && (
+                    <div className="px-3 py-2 text-[10px] text-slate-500 italic">Sin elementos en este nivel</div>
+                  )}
+                  {treeNavNodes.map(node => {
+                    const checked = filterNodeIds.has(node.id);
+                    return (
+                      <div key={node.id}
+                        className={`flex items-center gap-1.5 px-2 py-1.5 rounded transition-colors select-none mb-0.5
+                          ${checked ? 'bg-blue-600/30 text-white' : 'text-slate-300 hover:bg-white/5'}`}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleNodeFilter(node.id)}
+                          className="accent-blue-400 w-3.5 h-3.5 shrink-0 cursor-pointer"
+                        />
+                        <span
+                          className="text-[11px] font-medium flex-1 truncate cursor-pointer"
+                          onClick={() => toggleNodeFilter(node.id)}
+                          title={node.name}>
+                          {node.name}
+                        </span>
+                        {node.childCount > 0 && !node.name.includes('.') && (
+                          <span className="text-[9px] text-slate-500 shrink-0 bg-black/30 px-1 rounded">{node.childCount}</span>
+                        )}
+                        {node.hasChildren && (
+                          <button
+                            onClick={() => enterTreeFolder(node)}
+                            className="text-slate-400 hover:text-white shrink-0 p-1 rounded hover:bg-white/10 ml-1"
+                            title="Ver contenido de la carpeta">
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="flex-1 relative min-w-0">
+          <APSViewer4D
+            ref={viewerApiRef}
+            onModelUrnReady={setModelUrn}
+            onSelectionChange={handleViewerSelection}
+            onModelTreeReady={setTreeNodes}
+            elementColors={elementColors}
+            doneIds={doneIds}
+            globalGrey={isolateAssigned ? true : (isSimMode ? globalGrey : (basket.length === 0 && !selectedId && globalGrey))}
+            selection={chipSel ? [chipSel] : undefined}
+            nodeFilterIds={Array.from(filterNodeIds)}
+            hiddenIds={hiddenIds}
+          />
+        </div>
       </div>
 
       {/* ── Resize handle ─────────────────────────────────────────────────── */}
@@ -667,21 +838,44 @@ export default function WeeklyPlanLayout() {
                 <Ghost className="w-3.5 h-3.5" /> Ghost
               </button>
 
-              <select
-                value={discFilter}
-                onChange={e => setDiscFilter(e.target.value)}
-                className={`text-[10px] font-bold px-1.5 py-0.5 rounded border transition-colors outline-none cursor-pointer
-                  ${discFilter ? 'bg-blue-500 text-white border-blue-400' : 'bg-slate-700 text-slate-400 border-transparent hover:text-white'}`}
-                title="Filtrar lista + modelo 3D por disciplina"
-              >
-                <option value="">Todas las disciplinas</option>
-                {DISCIPLINES.filter(Boolean).map(d => <option key={d} value={d} className="bg-white text-black">{d}</option>)}
-              </select>
-              
-              <button onClick={() => setShowColors(!showColors)} title="Colorear elementos asignados por disciplina"
-                className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] transition-colors border ${showColors ? 'bg-amber-500/20 text-amber-500 border-amber-500/50' : 'bg-slate-700 text-slate-400 border-transparent hover:text-white'}`}>
-                <Palette className="w-3.5 h-3.5" /> Colores
-              </button>
+              {/* ── Vinculados group ── */}
+              <div className="flex items-center bg-slate-700/60 border border-slate-600 rounded overflow-hidden">
+                <span className="px-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-wide border-r border-slate-600 select-none">Vinc.</span>
+
+                {/* Color toggle */}
+                <button
+                  onClick={() => setShowAssigned(p => !p)}
+                  title={showAssigned ? 'Apagar color verde (vinculados)' : 'Encender color verde (vinculados)'}
+                  className={`flex items-center gap-1 px-1.5 py-0.5 text-[10px] transition-colors border-r border-slate-600
+                    ${showAssigned ? 'bg-emerald-500/25 text-emerald-300' : 'text-slate-500 hover:text-slate-200'}`}>
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: showAssigned ? '#22c55e' : '#475569' }} />
+                  Color
+                </button>
+
+                {/* Ocultar / Mostrar todos los vinculados */}
+                <button
+                  onClick={() => {
+                    if (assignedAreHidden) {
+                      setHiddenIds(prev => prev.filter(id => !allAssignedSet.has(id)));
+                    } else {
+                      setHiddenIds(prev => Array.from(new Set([...prev, ...allAssignedIds])));
+                    }
+                  }}
+                  title={assignedAreHidden ? 'Mostrar vinculados en el visor' : 'Ocultar vinculados del visor'}
+                  className={`flex items-center gap-1 px-1.5 py-0.5 text-[10px] transition-colors border-r border-slate-600
+                    ${assignedAreHidden ? 'bg-red-500/20 text-red-300' : 'text-slate-500 hover:text-slate-200'}`}>
+                  {assignedAreHidden ? '👁 Mostrar' : '🚫 Ocultar'}
+                </button>
+
+                {/* Aislar: mostrar SOLO los vinculados */}
+                <button
+                  onClick={() => setIsolateAssigned(p => !p)}
+                  title={isolateAssigned ? 'Desactivar aislamiento' : 'Aislar: mostrar solo elementos vinculados'}
+                  className={`flex items-center gap-1 px-1.5 py-0.5 text-[10px] transition-colors
+                    ${isolateAssigned ? 'bg-blue-500/25 text-blue-300' : 'text-slate-500 hover:text-slate-200'}`}>
+                  ⊞ Aislar
+                </button>
+              </div>
 
               <div className="w-px h-4 bg-slate-600 mx-1" />
 
@@ -729,12 +923,32 @@ export default function WeeklyPlanLayout() {
                     <Maximize2 className="w-3 h-3" /> Zoom ({basket.length})
                   </button>
                   <button
+                    onClick={() => {
+                      setHiddenIds(prev => Array.from(new Set([...prev, ...basket])));
+                      setBasket([]);
+                      setViewerSel([]);
+                    }}
+                    title="Ocultar los elementos seleccionados del visor"
+                    className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded border border-slate-500 text-slate-300 hover:border-red-400 hover:text-red-300 transition-colors">
+                    👁‍🗨 Ocultar
+                  </button>
+                  <button
                     onClick={() => { setBasket([]); setViewerSel([]); setChipSel(null); }}
                     title="Limpiar basket"
                     className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded border border-slate-600 text-slate-400 hover:border-red-400 hover:text-red-400 transition-colors">
                     <X className="w-3 h-3" /> Limpiar
                   </button>
                 </div>
+              )}
+
+              {/* Elementos ocultos — botón para restaurar */}
+              {hiddenIds.length > 0 && (
+                <button
+                  onClick={() => setHiddenIds([])}
+                  title="Mostrar todos los elementos ocultos"
+                  className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded border border-slate-500 text-slate-400 hover:border-emerald-400 hover:text-emerald-300 transition-colors">
+                  👁 Mostrar ({hiddenIds.length})
+                </button>
               )}
 
               {/* Sin actividad → aviso */}
@@ -935,28 +1149,30 @@ export default function WeeklyPlanLayout() {
                         className="group shrink-0 flex items-center px-1 border-r border-slate-200 relative"
                         style={{ width: 440, borderLeft: `3px solid ${color}` }}>
 
-                        {/* Multi-select checkbox */}
-                        <input
-                          type="checkbox"
-                          checked={selectedIds.has(act.id)}
-                          onChange={ev => {
-                            ev.stopPropagation();
-                            const adding = !selectedIds.has(act.id);
-                            setSelectedIds(prev => {
-                              const n = new Set(prev);
-                              adding ? n.add(act.id) : n.delete(act.id);
-                              return n;
-                            });
-                            if (adding) {
-                              setSelectedId(act.id);
-                              const actLinks = links[act.id];
-                              if (actLinks?.length) viewerApiRef.current?.zoomToElements(actLinks);
-                            }
-                          }}
-                          onClick={ev => ev.stopPropagation()}
-                          className="shrink-0 mr-1 accent-blue-500 cursor-pointer w-3 h-3"
-                          title="Seleccionar actividad"
-                        />
+                        {/* Multi-select checkbox — visible solo cuando Multi está activo */}
+                        {multiSelect && (
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(act.id)}
+                            onChange={ev => {
+                              ev.stopPropagation();
+                              const adding = !selectedIds.has(act.id);
+                              setSelectedIds(prev => {
+                                const n = new Set(prev);
+                                adding ? n.add(act.id) : n.delete(act.id);
+                                return n;
+                              });
+                              if (adding) {
+                                setSelectedId(act.id);
+                                const actLinks = links[act.id];
+                                if (actLinks?.length) viewerApiRef.current?.zoomToElements(actLinks);
+                              }
+                            }}
+                            onClick={ev => ev.stopPropagation()}
+                            className="shrink-0 mr-1 accent-blue-500 cursor-pointer w-3 h-3"
+                            title="Seleccionar actividad"
+                          />
+                        )}
 
                         {/* Drag handle + link badge */}
                         <div className="flex shrink-0 items-center justify-center w-8 mr-1 text-slate-300 group-hover:text-slate-500 cursor-grab active:cursor-grabbing">

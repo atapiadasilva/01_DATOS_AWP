@@ -12,9 +12,10 @@ import type { EntityWithAttributes } from '@/types';
 
 interface DataEditorProps {
   entities: EntityWithAttributes[];
+  onRefresh?: () => void;
 }
 
-export default function DataEditor({ entities }: DataEditorProps) {
+export default function DataEditor({ entities, onRefresh }: DataEditorProps) {
   const [selectedEntityId, setSelectedEntityId] = useState('');
   const [data, setData] = useState<any[]>([]);
   const [columns, setColumns] = useState<string[]>([]);
@@ -227,6 +228,32 @@ export default function DataEditor({ entities }: DataEditorProps) {
     }
   };
 
+  const handleDeleteEntity = async () => {
+    if (!selectedEntityId) return;
+    const entity = entities.find(e => e.id === selectedEntityId);
+    if (!entity) return;
+
+    if (!confirm(`¿Estás seguro de eliminar COMPLETAMENTE la tabla "${entity.name}"?\n\nEsto borrará permanentemente todos sus registros y columnas. Esta acción no se puede deshacer.`)) {
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      const { error } = await supabase.from('entities').delete().eq('id', selectedEntityId);
+      if (error) throw error;
+      
+      setSelectedEntityId('');
+      setData([]);
+      setColumns([]);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      console.error('Error deleting entity:', err);
+      alert('Error al eliminar la tabla.');
+    } finally {
+      setIsLoading(true); // Se mantendrá cargando hasta que el refresh de page.tsx re-renderice el componente
+    }
+  };
+
   return (
     <div className="flex h-full gap-0 overflow-hidden bg-white">
       {/* ─── PANEL IZQUIERDO: Selector de Entidades ─── */}
@@ -241,6 +268,14 @@ export default function DataEditor({ entities }: DataEditorProps) {
             <option value="">Seleccionar tabla...</option>
             {entities.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
           </select>
+          {selectedEntityId && (
+            <button
+              onClick={handleDeleteEntity}
+              className="w-full mt-3 flex items-center justify-center gap-2 py-2 px-3 border border-rose-100 bg-rose-50 text-rose-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-100 transition-all"
+            >
+              <Trash2 size={12} /> Eliminar Tabla
+            </button>
+          )}
         </div>
 
         <div className="p-4 flex-1 overflow-y-auto space-y-1">
