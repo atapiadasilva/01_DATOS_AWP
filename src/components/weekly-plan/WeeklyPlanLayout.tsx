@@ -598,13 +598,41 @@ export default function WeeklyPlanLayout() {
     // Actividades visibles: si hay filtro solo las de esa disciplina, si no todas
     const visibleActs = discFilter ? activities.filter(a => a.discipline === discFilter) : activities;
 
-    // 1. Planning Mode
+    // ── Lógica de colores 4D (compartida por Sim Mode y modo Aislar) ─────────
+    const build4DColors = () => {
+      const colors: ElementColor[] = [];
+      const done: string[] = [];
+      visibleActs.forEach(act => {
+        const st = getStatus(act, currentDate);
+        if (st === 'not-started') return; // no aparece aún
+        const actLinks = links[act.id] ?? [];
+        if (st === 'done') {
+          done.push(...actLinks); // verde completado — gestionado por doneIds en viewer
+        } else {
+          // En ejecución: color por semana de inicio
+          const hex = getWeekColor(act.start_date, weekStart);
+          actLinks.forEach(extId => colors.push({ externalId: extId, hex, alpha: 0.95 }));
+        }
+      });
+      // Basket siempre naranja encima de todo
+      basket.forEach(extId => {
+        const idx = colors.findIndex(c => c.externalId === extId);
+        const entry: ElementColor = { externalId: extId, hex: '#f59e0b', alpha: 0.98 };
+        if (idx >= 0) colors[idx] = entry; else colors.push(entry);
+      });
+      return { elementColors: colors, doneIds: done };
+    };
+
+    // 1. Modo Aislar activo → siempre usa lógica 4D
+    // Resultado: modelo en blanco → elementos aparecen progresivamente al ejecutarse
+    if (isolateAssigned) return build4DColors();
+
+    // 2. Planning Mode (sin simulación ni Aislar)
     if (!isSimMode) {
       const colors: ElementColor[] = [];
-      // Colorear vinculados en verde si showAssigned O isolateAssigned están activos
-      if (showAssigned || isolateAssigned) {
+      if (showAssigned) {
         const inBasket = new Set(basket);
-        if (selectedIds.size > 0 && basket.length === 0 && !isolateAssigned) {
+        if (selectedIds.size > 0 && basket.length === 0) {
           // Solo la(s) actividad(es) seleccionada(s)
           visibleActs.forEach(act => {
             if (!selectedIds.has(act.id)) return;
@@ -627,46 +655,13 @@ export default function WeeklyPlanLayout() {
       basket.forEach(extId => {
         const idx = colors.findIndex(c => c.externalId === extId);
         const entry: ElementColor = { externalId: extId, hex: '#f59e0b', alpha: 0.98 };
-        if (idx >= 0) colors[idx] = entry;
-        else colors.push(entry);
+        if (idx >= 0) colors[idx] = entry; else colors.push(entry);
       });
       return { elementColors: colors, doneIds: [] };
     }
 
-    // 2. 4D Simulation Mode
-    const colors: ElementColor[] = [];
-    const done: string[] = [];
-    visibleActs.forEach(act => {
-      const st = getStatus(act, currentDate);
-      if (st === 'not-started') return;
-      const actLinks = links[act.id] ?? [];
-      if (st === 'done') {
-        done.push(...actLinks);
-      } else {
-        const hex = getWeekColor(act.start_date, weekStart);
-        actLinks.forEach(extId => colors.push({ externalId: extId, hex, alpha: 0.95 }));
-      }
-    });
-
-    if (showAssigned || isolateAssigned) {
-      const alreadyColored = new Set([...done, ...colors.map(c => c.externalId)]);
-      visibleActs.forEach(act => {
-        (links[act.id] ?? []).forEach(extId => {
-          if (!alreadyColored.has(extId)) {
-            colors.push({ externalId: extId, hex: '#22c55e', alpha: 0.4 });
-          }
-        });
-      });
-    }
-
-    basket.forEach(extId => {
-      const idx = colors.findIndex(c => c.externalId === extId);
-      const entry: ElementColor = { externalId: extId, hex: '#f59e0b', alpha: 0.98 };
-      if (idx >= 0) colors[idx] = entry;
-      else colors.push(entry);
-    });
-
-    return { elementColors: colors, doneIds: done };
+    // 3. 4D Simulation Mode (play / scrub)
+    return build4DColors();
   }, [activities, links, currentDate, selectedId, selectedIds, isSimMode, weekStart, showAssigned, isolateAssigned, basket, discFilter]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -782,7 +777,8 @@ export default function WeeklyPlanLayout() {
             onModelTreeReady={setTreeNodes}
             elementColors={elementColors}
             doneIds={doneIds}
-            globalGrey={isolateAssigned ? true : (isSimMode ? globalGrey : (basket.length === 0 && !selectedId && globalGrey))}
+            globalGrey={isolateAssigned ? true : globalGrey}
+            strictIsolate={isolateAssigned}
             selection={chipSel ? [chipSel] : undefined}
             nodeFilterIds={Array.from(filterNodeIds)}
             hiddenIds={hiddenIds}

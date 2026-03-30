@@ -108,10 +108,15 @@ export default function CWPMatcher({ programData, cwpGroups, projectId, onMappin
     const toDelete = [];
 
     for (const id of descendants) {
+      const isRoot = id === edt; // nodo directamente clickeado — siempre asignar
       if (cwpName) {
+        // No sobreescribir hijos que ya tienen un mapeo explícito en la BD
+        if (!isRoot && mappings[id]) continue;
         newMappings[id] = cwpName;
         toUpsert.push({ project_id: projectId, edt: id, cwp_name: cwpName });
       } else {
+        // Al borrar, solo limpiar el nodo raíz — los hijos conservan sus propios mapeos
+        if (!isRoot) continue;
         delete newMappings[id];
         toDelete.push(id);
       }

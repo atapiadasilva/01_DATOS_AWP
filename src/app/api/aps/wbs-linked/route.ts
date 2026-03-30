@@ -19,6 +19,7 @@ const DEFAULTS = {
   wbs_col_duration:       'Duración',
   wbs_col_discipline:     'Disciplina',
   wbs_col_cwp:            null as string | null,
+  wbs_col_hh:             null as string | null,
 };
 
 async function loadProjectCfg(projectId: string | null) {
@@ -42,6 +43,7 @@ async function loadProjectCfg(projectId: string | null) {
       wbs_col_duration:       settings.wbs_col_duration       || DEFAULTS.wbs_col_duration,
       wbs_col_discipline:     settings.wbs_col_discipline      || DEFAULTS.wbs_col_discipline,
       wbs_col_cwp:            settings.wbs_col_cwp            || null,
+      wbs_col_hh:             settings.wbs_col_hh             || null,
     };
   }
   return cfg;
@@ -147,6 +149,8 @@ export async function GET(req: NextRequest) {
       baseEnd:    excelToIso(d[cfg.wbs_col_baseline_end]),
       progress:   Math.round((Number(d[cfg.wbs_col_progress] ?? 0)) * 100),
       discipline: String(d[cfg.wbs_col_discipline] ?? ''),
+      cwp:        cfg.wbs_col_cwp ? (d[cfg.wbs_col_cwp] ?? '') : undefined,
+      hh:         cfg.wbs_col_hh  ? (parseFloat(d[cfg.wbs_col_hh]) || 0) : 0,
     };
   });
 

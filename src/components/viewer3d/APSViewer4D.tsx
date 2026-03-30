@@ -46,6 +46,12 @@ interface APSViewer4DProps {
   nodeFilterIds?:      number[];
   /** External IDs that should be hidden (viewer.hide) regardless of isolation state */
   hiddenIds?:          string[];
+  /**
+   * When true + globalGrey: if no elements are assigned/colored, hide ALL
+   * (blank model) instead of showAll. Used by Aislar mode so the model
+   * starts empty and elements appear progressively as they are executed.
+   */
+  strictIsolate?:      boolean;
 }
 
 const APSViewer4D = forwardRef<APSViewer4DHandle, APSViewer4DProps>(function APSViewer4D({
@@ -58,6 +64,7 @@ const APSViewer4D = forwardRef<APSViewer4DHandle, APSViewer4DProps>(function APS
   selection = [],
   nodeFilterIds = [],
   hiddenIds = [],
+  strictIsolate = false,
 }, ref) {
   const { currentProject } = useProject();
   const containerRef     = useRef<HTMLDivElement>(null);
@@ -175,11 +182,20 @@ const APSViewer4D = forwardRef<APSViewer4DHandle, APSViewer4DProps>(function APS
       }
       viewer.isolate(visibleDbIds, viewer.model);
     } else {
-      // Sin filtro — comportamiento 4D normal
+      // Sin filtro — comportamiento 4D / Aislar normal
       if (globalGrey) {
         const assigned = [...coloredDbIds, ...doneDbIds];
-        visibleDbIds = assigned.length > 0 ? assigned : [-1];
-        viewer.isolate(visibleDbIds, viewer.model);
+        if (assigned.length > 0) {
+          // Aislar solo los elementos coloreados/completados — el resto queda ghosteado pero CLICKEABLE
+          viewer.isolate(assigned, viewer.model);
+        } else if (strictIsolate) {
+          // Modo Aislar activo sin elementos aún ejecutados → modelo en blanco
+          // isolate([]) ghostea todo; los elementos siguen siendo clickeables
+          viewer.isolate([], viewer.model);
+        } else {
+          // Sin Aislar activo y sin asignados: mostrar todo el modelo
+          viewer.showAll();
+        }
       } else {
         viewer.showAll();
       }
@@ -199,7 +215,7 @@ const APSViewer4D = forwardRef<APSViewer4DHandle, APSViewer4DProps>(function APS
     if (hiddenDbIds.length > 0) viewer.hide(hiddenDbIds, viewer.model);
 
     viewer.impl?.invalidate(true);
-  }, [elementColors, doneIds, globalGrey, nodeFilterIds, hiddenIds]);
+  }, [elementColors, doneIds, globalGrey, nodeFilterIds, hiddenIds, strictIsolate]);
 
   // Load APS SDK
   useEffect(() => {
@@ -330,21 +346,34 @@ const APSViewer4D = forwardRef<APSViewer4DHandle, APSViewer4DProps>(function APS
   }, [sdkReady]);
 
   const loadModel = useCallback(async (viewer: any) => {
+    // Unload any previously loaded models and reset mappings
+    modelLoadedRef.current  = false;
+    extIdToDbIdRef.current  = {};
+    dbIdToExtIdRef.current  = {};
+    try {
+      const models = viewer.getAllModels?.() ?? [];
+      models.forEach((m: any) => { try { viewer.unloadModel(m); } catch {} });
+    } catch {}
+
     setStatus('Buscando modelo del proyecto…');
     setError('');
+    setModelName('');
     try {
-      const url = currentProject?.id 
+      const url = currentProject?.id
         ? `/api/aps/default-model?projectId=${currentProject.id}`
         : '/api/aps/default-model';
       const r = await fetch(url);
       if (!r.ok) { setError((await r.json()).error ?? 'Modelo no encontrado'); setStatus(''); return; }
       const { urn, name } = await r.json();
-      onModelUrnReady?.(urn);
       setModelName(name);
       setStatus(`Cargando ${name}…`);
       window.Autodesk.Viewing.Document.load(
         `urn:${urn}`,
-        (doc: any) => { viewer.loadDocumentNode(doc, doc.getRoot().getDefaultGeometry()); setStatus(''); },
+        (doc: any) => {
+          viewer.loadDocumentNode(doc, doc.getRoot().getDefaultGeometry());
+          onModelUrnReady?.(urn); // notify parent AFTER model starts loading
+          setStatus('');
+        },
         (code: number, msg: string) => { setError(`Error (${code}): ${msg}`); setStatus(''); }
       );
     } catch (e: any) { setError(`Error: ${e.message}`); setStatus(''); }

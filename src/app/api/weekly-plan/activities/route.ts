@@ -8,15 +8,15 @@ const supabase = createClient(
 
 export async function GET(req: NextRequest) {
   const projectId = req.nextUrl.searchParams.get('projectId');
+  if (!projectId) return NextResponse.json({ error: 'projectId required' }, { status: 400 });
   let q = supabase.from('weekly_plan_activities').select('*').order('sort_order', { ascending: true }).order('start_date');
-  if (projectId) q = q.eq('project_id', projectId);
+  q = q.eq('project_id', projectId);
   
   const { data, error } = await q;
   if (error) {
     // If sort_order doesn't exist yet, fallback to start_date
     if (error.code === '42703') {
-      let fq = supabase.from('weekly_plan_activities').select('*').order('start_date');
-      if (projectId) fq = fq.eq('project_id', projectId);
+      let fq = supabase.from('weekly_plan_activities').select('*').order('start_date').eq('project_id', projectId);
       const fb = await fq;
       if (fb.error) return NextResponse.json({ error: fb.error.message }, { status: 500 });
       return NextResponse.json(fb.data ?? []);

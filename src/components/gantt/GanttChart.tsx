@@ -26,7 +26,6 @@ interface GanttTask {
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const TOTAL_HH = 97705.97;
 const ROW_H    = 36;
 const COL_EDT  = 72;
 const COL_HH   = 76;
@@ -35,10 +34,19 @@ const LEFT_W   = COL_EDT + 240 + COL_HH + COL_PCT; // 446px
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function parseDate(s: string): Date | null {
-  if (!s || s === 'NOD' || !s.includes('/')) return null;
-  const [d, m, y] = s.split('/').map(Number);
-  if (!y || !m || !d) return null;
-  return new Date(y, m - 1, d);
+  if (!s || s === 'NOD') return null;
+  // ISO format: yyyy-mm-dd (from API)
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const [y, m, d] = s.slice(0, 10).split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }
+  // dd/mm/yyyy (from legacy JSON)
+  if (s.includes('/')) {
+    const [d, m, y] = s.split('/').map(Number);
+    if (!y || !m || !d) return null;
+    return new Date(y, m - 1, d);
+  }
+  return null;
 }
 
 function fmtHH(n: number): string {
@@ -89,55 +97,56 @@ export default function GanttChart() {
   const [cwpFilter, setCwpFilter] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
   const [dbMappings, setDbMappings] = useState<Record<string, string>>({});
+  const [entityName, setEntityName] = useState('');
 
-  // ── Load data ──────────────────────────────────────────────────────────────
+  // ── Load data from DB via API ──────────────────────────────────────────────
   useEffect(() => {
+    if (!currentProject?.id) return;
     const loadData = async () => {
       setLoading(true);
       try {
-        const res = await fetch('/gantt_program.json');
-        const raw = await res.json();
-        
-        let mappings: Record<string, string> = {};
-        if (currentProject?.id) {
-          const { data } = await supabase
+        const [wbsRes, mappingsRes] = await Promise.all([
+          fetch(`/api/aps/wbs?projectId=${currentProject.id}`).then(r => {
+            if (!r.ok) throw new Error(`WBS API error: ${r.status}`);
+            return r.json();
+          }),
+          supabase
             .from('wbs_cwp_mappings')
             .select('edt, cwp_name')
-            .eq('project_id', currentProject.id);
-          if (data) data.forEach(m => { mappings[m.edt] = m.cwp_name; });
-          setDbMappings(mappings);
-        }
+            .eq('project_id', currentProject.id),
+        ]);
+
+        const raw: any[]    = wbsRes.tasks ?? [];
+        const mappings: Record<string, string> = {};
+        (mappingsRes.data ?? []).forEach((m: any) => { mappings[m.edt] = m.cwp_name; });
+        setDbMappings(mappings);
+        setEntityName(wbsRes.entityName ?? '');
 
         const items: GanttTask[] = raw.map((d: any) => ({
           edt:    String(d.edt ?? ''),
-          // Prioridad: Mapeo dinámico > CWP del JSON
           cwp:    mappings[String(d.edt)] || String(d.cwp ?? ''),
           name:   String(d.name ?? ''),
-          dur:    String(d.dur ?? ''),
-          bStart: String(d.bStart ?? ''),
-          bEnd:   String(d.bEnd ?? ''),
-          aStart: String(d.aStart ?? ''),
-          aEnd:   String(d.aEnd ?? ''),
-          pct:    parseFloat(d.pct)  || 0,
-          hh:     parseFloat(d.hh)   || 0,
-          level:  parseInt(d.level)  || 0,
+          dur:    String(d.duration ?? d.dur ?? ''),
+          bStart: String(d.baseStart ?? d.bStart ?? ''),
+          bEnd:   String(d.baseEnd   ?? d.bEnd   ?? ''),
+          aStart: String(d.start     ?? d.aStart ?? ''),
+          aEnd:   String(d.end       ?? d.aEnd   ?? ''),
+          pct:    parseFloat(d.progress ?? d.pct) || 0,
+          hh:     parseFloat(d.hh)  || 0,
+          level:  parseInt(d.level) || 0,
         }));
         setTasks(items);
 
-        // Build parent set and initialize collapsed
+        // Collapse parents at level ≥ 2 by default
         const pSet = new Set<string>();
         items.forEach(t => { getAncestors(t.edt).forEach(a => pSet.add(a)); });
-        const initCollapsed = new Set<string>(
-          items.filter(t => pSet.has(t.edt) && t.level >= 2).map(t => t.edt)
-        );
-        setCollapsed(initCollapsed);
+        setCollapsed(new Set(items.filter(t => pSet.has(t.edt) && t.level >= 2).map(t => t.edt)));
       } catch (e) {
         console.error('Error loading gantt data:', e);
       } finally {
         setLoading(false);
       }
     };
-
     loadData();
   }, [currentProject?.id]);
 
@@ -197,13 +206,33 @@ export default function GanttChart() {
     });
   }, [tasks, collapsed, search, cwpFilter]);
 
-  // ── Timeline ───────────────────────────────────────────────────────────────
-  const { dispStart, months, totalDispDays } = useMemo(() => {
-    const dispStart = new Date(2025, 8, 1);  // Sep 1 2025
-    const dispEnd   = new Date(2026, 9, 1);  // Oct 1 2026
+  // ── Total HH (dynamic from root task or sum of leaves) ───────────────────
+  const totalHH = useMemo(() => {
+    const root = tasks.find(t => t.edt === '0');
+    if (root && root.hh > 0) return root.hh;
+    return tasks.filter(t => !isParent(t.edt)).reduce((s, t) => s + t.hh, 0);
+  }, [tasks, isParent]);
+
+  // ── Timeline computed from actual task dates ───────────────────────────────
+  const { dispStart, dispEnd, months, totalDispDays } = useMemo(() => {
+    const dates = tasks
+      .flatMap(t => [t.bStart, t.bEnd, t.aStart, t.aEnd])
+      .map(s => parseDate(s))
+      .filter((d): d is Date => d !== null);
+
+    let start = new Date(2025, 8, 1);
+    let end   = new Date(2026, 9, 1);
+
+    if (dates.length) {
+      const mn = new Date(Math.min(...dates.map(d => d.getTime())));
+      const mx = new Date(Math.max(...dates.map(d => d.getTime())));
+      start = new Date(mn.getFullYear(), mn.getMonth(), 1);
+      end   = new Date(mx.getFullYear(), mx.getMonth() + 2, 1);
+    }
+
     const months: { y: number; m: number; label: string; days: number }[] = [];
-    const d = new Date(dispStart);
-    while (d < dispEnd) {
+    const d = new Date(start);
+    while (d < end) {
       months.push({
         y: d.getFullYear(), m: d.getMonth(),
         label: d.toLocaleDateString('es', { month: 'short', year: '2-digit' }),
@@ -211,9 +240,9 @@ export default function GanttChart() {
       });
       d.setMonth(d.getMonth() + 1);
     }
-    const totalDispDays = Math.floor((dispEnd.getTime() - dispStart.getTime()) / 86400000);
-    return { dispStart, months, totalDispDays };
-  }, []);
+    const totalDispDays = Math.floor((end.getTime() - start.getTime()) / 86400000);
+    return { dispStart: start, dispEnd: end, months, totalDispDays };
+  }, [tasks]);
 
   const totalW = totalDispDays * dayW;
 
@@ -228,18 +257,20 @@ export default function GanttChart() {
 
   // ── Today marker ──────────────────────────────────────────────────────────
   const todayLeft = useMemo(() => {
-    const today = new Date(2026, 2, 25); // Mar 25 2026 (system date)
-    return Math.max(0, (today.getTime() - dispStart.getTime()) / 86400000) * dayW;
-  }, [dispStart, dayW]);
+    const today = new Date();
+    const diff = (today.getTime() - dispStart.getTime()) / 86400000;
+    if (diff < 0 || diff > totalDispDays) return -1;
+    return diff * dayW;
+  }, [dispStart, totalDispDays, dayW]);
 
   // ── Metrics ────────────────────────────────────────────────────────────────
   const metrics = useMemo(() => {
     const root = tasks.find((t: GanttTask) => t.edt === '0');
-    const globalPct = root?.pct ?? 20;
-    const doneHH = TOTAL_HH * globalPct / 100;
+    const globalPct = root?.pct ?? 0;
+    const doneHH = totalHH * globalPct / 100;
     const leaves = tasks.filter((t: GanttTask) => !isParent(t.edt) && t.hh > 0);
     return { globalPct, doneHH, leafCount: leaves.length };
-  }, [tasks, isParent]);
+  }, [tasks, isParent, totalHH]);
 
   const isMilestone = (t: GanttTask) =>
     t.dur === '0 días' || t.dur === '0 dias' || t.dur === '0 d' || t.dur.startsWith('0 d');
@@ -262,8 +293,9 @@ export default function GanttChart() {
 
   if (!tasks.length) {
     return (
-      <div className="flex items-center justify-center h-full text-brand-slate/40 text-sm font-bold">
-        No se encontró el archivo gantt_program.json en /public
+      <div className="flex flex-col items-center justify-center h-full gap-2 text-brand-slate/40 text-sm font-bold">
+        <span>Sin programa de obra cargado para este proyecto.</span>
+        <span className="text-xs font-normal">Carga un archivo WBS en &quot;Carga de Datos&quot; y configura las columnas en Ajustes del proyecto.</span>
       </div>
     );
   }
@@ -274,13 +306,13 @@ export default function GanttChart() {
       {/* ── Métricas del programa ── */}
       <div className="shrink-0 bg-brand-deep px-6 py-3 flex items-center gap-4 shadow-lg shadow-brand-deep/20">
         <div className="mr-2">
-          <p className="text-[9px] font-black uppercase tracking-widest text-brand-electric/60">Programa de Obra · Rev.0</p>
+          <p className="text-[9px] font-black uppercase tracking-widest text-brand-electric/60">{entityName || 'Programa de Obra'}</p>
           <h2 className="text-[15px] font-black italic text-white tracking-tight leading-tight">
-            Espesador de Cabeza DAND
+            {tasks.find(t => t.edt === '0')?.name || currentProject?.name || '—'}
           </h2>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          <MetricCard icon={BarChart3}   label="HH Totales"    value="97.705,97 h" color="text-brand-electric" />
+          <MetricCard icon={BarChart3}   label="HH Totales"    value={totalHH > 0 ? fmtHH(totalHH) : '—'} color="text-brand-electric" />
           <MetricCard icon={TrendingUp}  label="HH Ejecutadas" value={fmtHH(metrics.doneHH)} color="text-brand-orange" />
           <MetricCard icon={Target}      label="% Avance"      value={`${metrics.globalPct}%`} color="text-brand-orange" />
           <MetricCard icon={Clock}       label="Actividades"   value={`${tasks.length}`} sub={`${metrics.leafCount} con HH`} color="text-white/60" />
@@ -298,7 +330,8 @@ export default function GanttChart() {
             />
           </div>
           <div className="flex justify-between text-[7px] font-bold text-white/30 mt-1">
-            <span>Sep 2025</span><span>Sep 2026</span>
+            <span>{dispStart.toLocaleDateString('es', { month: 'short', year: 'numeric' })}</span>
+            <span>{dispEnd.toLocaleDateString('es', { month: 'short', year: 'numeric' })}</span>
           </div>
         </div>
       </div>
@@ -555,10 +588,12 @@ export default function GanttChart() {
                   ))}
 
                   {/* Today line */}
-                  <div
-                    className="absolute top-0 bottom-0 w-px bg-brand-orange/60 z-10 pointer-events-none"
-                    style={{ left: todayLeft }}
-                  />
+                  {todayLeft >= 0 && (
+                    <div
+                      className="absolute top-0 bottom-0 w-px bg-brand-orange/60 z-10 pointer-events-none"
+                      style={{ left: todayLeft }}
+                    />
+                  )}
 
                   {mile ? (
                     // ── Milestone diamond ──────────────────────────────
@@ -637,10 +672,16 @@ export default function GanttChart() {
 
       {/* ── Footer ── */}
       <div className="shrink-0 bg-white border-t border-brand-cloud px-5 py-2 flex items-center gap-6 text-[8px] font-black uppercase tracking-widest text-brand-slate/30">
-        <span>Rev.0 · Sep 2025 → Sep 2026 · {tasks.length} actividades · 97.705,97 HH</span>
+        <span>
+          {dispStart.toLocaleDateString('es', { month: 'short', year: 'numeric' })} →{' '}
+          {dispEnd.toLocaleDateString('es', { month: 'short', year: 'numeric' })} ·{' '}
+          {tasks.length} actividades{totalHH > 0 ? ` · ${fmtHH(totalHH)}` : ''}
+        </span>
         <div className="flex items-center gap-1.5 ml-auto">
           <div className="w-2 h-2 rounded-full bg-brand-orange" />
-          <span className="text-brand-orange">Hoy — 25 Mar 2026</span>
+          <span className="text-brand-orange">
+            Hoy — {new Date().toLocaleDateString('es-CL', { day: '2-digit', month: 'short', year: 'numeric' })}
+          </span>
         </div>
       </div>
     </div>

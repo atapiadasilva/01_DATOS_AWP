@@ -41,33 +41,41 @@ export default function CwpDashboard({ projectId, entities, customViews }: CwpDa
   const [isLinking, setIsLinking] = useState(false);
   const [showLinkSelector, setShowLinkSelector] = useState(false);
 
-  // 1. Cargar Mapeos WBS-CWP y Tareas
+  // 1. Cargar Mapeos WBS-CWP y Tareas desde API dinámica
   useEffect(() => {
     const loadProgramData = async () => {
       try {
-        // Mapeos
-        const { data: mappingsData } = await supabase
-          .from('wbs_cwp_mappings')
-          .select('edt, cwp_name')
-          .eq('project_id', projectId);
-        
-        if (mappingsData) {
-          const m: Record<string, string> = {};
-          mappingsData.forEach(r => { m[r.edt] = r.cwp_name; });
-          setWbsMappings(m);
-        }
+        // Cargar mapeos y tareas en paralelo
+        const [mappingsRes, wbsRes] = await Promise.all([
+          supabase
+            .from('wbs_cwp_mappings')
+            .select('edt, cwp_name')
+            .eq('project_id', projectId),
+          fetch(`/api/aps/wbs?projectId=${projectId}`).then(r => {
+            if (!r.ok) throw new Error(`WBS API error: ${r.status}`);
+            return r.json();
+          }),
+        ]);
 
-        // Tareas (JSON fallback)
-        const res = await fetch('/gantt_program.json');
-        if (res.ok) {
-          const data = await res.json();
-          setGanttTasks(data.map((d: any) => ({
-            ...d, 
-            hh: parseFloat(d.hh) || 0, 
-            pct: parseFloat(d.pct) || 0,
-            cwp: wbsMappings[String(d.edt)] || d.cwp || ''
-          })));
-        }
+        // Construir mapa de mapeos primero
+        const m: Record<string, string> = {};
+        (mappingsRes.data ?? []).forEach((r: any) => { m[r.edt] = r.cwp_name; });
+        setWbsMappings(m);
+
+        // Mapear tareas usando los mapeos recién cargados (no el estado stale)
+        const rawTasks: any[] = wbsRes.tasks ?? [];
+        setGanttTasks(rawTasks.map((d: any) => ({
+          edt:        String(d.edt ?? ''),
+          name:       String(d.name ?? ''),
+          hh:         parseFloat(d.hh) || 0,
+          pct:        parseFloat(d.progress ?? d.pct) || 0,
+          cwp:        m[String(d.edt)] || d.cwp || '',
+          start:      d.start ?? '',
+          end:        d.end ?? '',
+          discipline: d.discipline ?? '',
+          level:      d.level ?? 0,
+          hasChildren: d.hasChildren ?? false,
+        })));
       } catch (e) {
         console.error('Error loading program data:', e);
       }

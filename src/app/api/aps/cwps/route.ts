@@ -11,6 +11,7 @@ const supabase = createClient(
 // 2. Falls back to extracting unique CWPs from data_records
 export async function GET(req: NextRequest) {
   const projectId = req.nextUrl.searchParams.get('projectId');
+  if (!projectId) return NextResponse.json({ error: 'projectId required' }, { status: 400 });
 
   // ── Try cwp_master ────────────────────────────────────────────────────────
   let masterQuery = supabase
@@ -19,7 +20,7 @@ export async function GET(req: NextRequest) {
     .order('sort_order', { ascending: true })
     .order('cwp_code',   { ascending: true });
 
-  if (projectId) masterQuery = masterQuery.eq('project_id', projectId);
+  masterQuery = masterQuery.eq('project_id', projectId);
 
   const { data: masterData } = await masterQuery;
 
@@ -32,15 +33,14 @@ export async function GET(req: NextRequest) {
     .from('data_records')
     .select('data, entity_id');
 
-  if (projectId) {
-    // Join via entities to filter by project
-    const { data: entities } = await supabase
-      .from('entities')
-      .select('id')
-      .eq('project_id', projectId);
-    const ids = (entities ?? []).map((e: any) => e.id);
-    if (ids.length) recQuery = recQuery.in('entity_id', ids);
-  }
+  // Join via entities to filter by project
+  const { data: entities } = await supabase
+    .from('entities')
+    .select('id')
+    .eq('project_id', projectId);
+  const ids = (entities ?? []).map((e: any) => e.id);
+  if (ids.length) recQuery = recQuery.in('entity_id', ids);
+  else return NextResponse.json([]);
 
   const { data: records, error } = await recQuery.limit(5000);
 
