@@ -76,6 +76,8 @@ const APSViewer4D = forwardRef<APSViewer4DHandle, APSViewer4DProps>(function APS
   const modelLoadedRef   = useRef(false);
   const globalGreyRef    = useRef<boolean>(true);
   const instanceTreeRef  = useRef<any>(null);
+  // Signature of last applied state — skip if unchanged to prevent flicker
+  const lastAppliedSigRef = useRef<string>('');
 
   const [sdkReady,    setSdkReady]    = useState(false);
   const [viewerReady, setViewerReady] = useState(false);
@@ -143,6 +145,18 @@ const APSViewer4D = forwardRef<APSViewer4DHandle, APSViewer4DProps>(function APS
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer || !modelLoadedRef.current) return;
+
+    // Build a signature of the incoming state — skip expensive viewer ops if nothing changed
+    const sig = JSON.stringify({
+      ec: (elementColors ?? []).map(c => `${c.externalId}:${c.hex}:${c.alpha ?? 0.95}`).sort(),
+      di: (doneIds ?? []).slice().sort(),
+      gg: globalGrey,
+      si: strictIsolate,
+      nf: (nodeFilterIds ?? []).slice().sort(),
+      hi: (hiddenIds ?? []).slice().sort(),
+    });
+    if (sig === lastAppliedSigRef.current) return;
+    lastAppliedSigRef.current = sig;
     const coloredDbIds = (elementColors ?? [])
       .map(({ externalId }) => extIdToDbIdRef.current[externalId])
       .filter((id): id is number => id != null);
@@ -190,8 +204,8 @@ const APSViewer4D = forwardRef<APSViewer4DHandle, APSViewer4DProps>(function APS
           viewer.isolate(assigned, viewer.model);
         } else if (strictIsolate) {
           // Modo Aislar activo sin elementos aún ejecutados → modelo en blanco
-          // isolate([]) ghostea todo; los elementos siguen siendo clickeables
-          viewer.isolate([], viewer.model);
+          // isolate([]) en Forge muestra TODO — usar [-1] para ocultar todo
+          viewer.isolate([-1], viewer.model);
         } else {
           // Sin Aislar activo y sin asignados: mostrar todo el modelo
           viewer.showAll();

@@ -147,8 +147,8 @@ export default function WeeklyPlanLayout() {
   const [treeNavPath,   setTreeNavPath]   = useState<{ id: number; name: string }[]>([]); // breadcrumb
   const [treeNavNodes,  setTreeNavNodes]  = useState<TreeNodeInfo[]>([]); // nodos en nivel actual
   const [draggedId,   setDraggedId]   = useState<string | null>(null);
-  const [showAssigned,   setShowAssigned]   = useState(true);  // colorear vinculados en verde
-  const [isolateAssigned, setIsolateAssigned] = useState(false); // aislar: mostrar solo vinculados
+  const [showAssigned,   setShowAssigned]   = useState(false); // colorear vinculados en verde
+  const [isolateAssigned, setIsolateAssigned] = useState(true); // aislar: mostrar solo vinculados
   const [hiddenIds,      setHiddenIds]      = useState<string[]>([]); // elementos ocultos manualmente
   const [dirtyIds,       setDirtyIds]       = useState<Set<string>>(new Set());
   const [collapsedDiscs, setCollapsedDiscs] = useState<Set<string>>(new Set());
@@ -174,7 +174,6 @@ export default function WeeklyPlanLayout() {
   const [playing,     setPlaying]     = useState(false);
   const [speed,       setSpeed]       = useState<typeof SPEEDS[number]>(1);
   const [currentDate, setCurrentDate] = useState<Date>(() => new Date());
-  const [globalGrey,  setGlobalGrey]  = useState(true);
 
   // Gantt drag
   const dragRef = useRef<{
@@ -579,11 +578,6 @@ export default function WeeklyPlanLayout() {
     return Array.from(map.entries()).map(([discipline, acts]) => ({ discipline, acts }));
   }, [filtered]);
 
-  // ── 4D Colors Evaluation ───────────────────────────────────────────────────
-  // We consider "Simulation Mode" active if playing, or if the user has scrubbed to a different date than today.
-  const isSimMode = playing || Math.abs(currentDate.getTime() - today.getTime()) > 86400000;
-
-
   // Todos los externalIds vinculados a cualquier actividad (para Ocultar/Aislar)
   const allAssignedIds = useMemo(() => {
     const ids = new Set<string>();
@@ -594,75 +588,108 @@ export default function WeeklyPlanLayout() {
   const allAssignedSet  = useMemo(() => new Set(allAssignedIds), [allAssignedIds]);
   const assignedAreHidden = allAssignedIds.length > 0 && allAssignedIds.every(id => hiddenIds.includes(id));
 
+  // IDs de elementos vinculados a las actividades chequeadas (solo cuando multiSelect ON)
+  // El row-click (selectedId) NO afecta al viewer — solo sirve para el panel de edición
+  const checkedLinks = useMemo(() => {
+    if (!multiSelect || selectedIds.size === 0) return [];
+    const ids: string[] = [];
+    selectedIds.forEach(actId => ids.push(...(links[actId] ?? [])));
+    return ids;
+  }, [multiSelect, selectedIds, links]);
+
+  // Solo el Play activa el modo 4D progresivo — el scrubbing manual mantiene vista estática
+  const is4DMode = playing;
+
   const { elementColors, doneIds } = useMemo(() => {
-    // Actividades visibles: si hay filtro solo las de esa disciplina, si no todas
     const visibleActs = discFilter ? activities.filter(a => a.discipline === discFilter) : activities;
 
-    // ── Lógica de colores 4D (compartida por Sim Mode y modo Aislar) ─────────
-    const build4DColors = () => {
+    // Helper: aplica basket naranja encima
+    const applyBasket = (colors: ElementColor[]) => {
+      basket.forEach(extId => {
+        const idx = colors.findIndex(c => c.externalId === extId);
+        const entry: ElementColor = { externalId: extId, hex: '#f59e0b', alpha: 0.98 };
+        if (idx >= 0) colors[idx] = entry; else colors.push(entry);
+      });
+    };
+
+    // Aplica highlight naranja para los chequeados (encima de cualquier otro color)
+    const applyChecked = (colors: ElementColor[]) => {
+      checkedLinks.forEach(extId => {
+        const idx = colors.findIndex(c => c.externalId === extId);
+        const entry: ElementColor = { externalId: extId, hex: '#f97316', alpha: 0.99 };
+        if (idx >= 0) colors[idx] = entry; else colors.push(entry);
+      });
+    };
+
+    // Todos los IDs vinculados (para modo estático)
+    const allLinkedIds = Array.from(new Set(
+      visibleActs.flatMap(act => links[act.id] ?? [])
+    ));
+
+    // ── MODO 4D (Play o scrub activo) ────────────────────────────────────────
+    // Progresivo: elementos aparecen conforme avanza la fecha
+    if (is4DMode) {
       const colors: ElementColor[] = [];
       const done: string[] = [];
       visibleActs.forEach(act => {
         const st = getStatus(act, currentDate);
-        if (st === 'not-started') return; // no aparece aún
+        if (st === 'not-started') return; // aún no aparece
         const actLinks = links[act.id] ?? [];
-        if (st === 'done') {
-          done.push(...actLinks); // verde completado — gestionado por doneIds en viewer
+        if (!showAssigned) {
+          // Color OFF: visible con color original
+          done.push(...actLinks);
         } else {
-          // En ejecución: color por semana de inicio
-          const hex = getWeekColor(act.start_date, weekStart);
-          actLinks.forEach(extId => colors.push({ externalId: extId, hex, alpha: 0.95 }));
+          // Color ON: verde progresivo
+          actLinks.forEach(extId => colors.push({ externalId: extId, hex: '#22c55e', alpha: 0.85 }));
         }
       });
-      // Basket siempre naranja encima de todo
-      basket.forEach(extId => {
-        const idx = colors.findIndex(c => c.externalId === extId);
-        const entry: ElementColor = { externalId: extId, hex: '#f59e0b', alpha: 0.98 };
-        if (idx >= 0) colors[idx] = entry; else colors.push(entry);
-      });
+      applyChecked(colors);
+      applyBasket(colors);
+      // En Aislar ON: strictIsolate hace que los no-asignados queden ghosteados
+      // colors vacío al inicio → modelo vacío (strictIsolate)
       return { elementColors: colors, doneIds: done };
-    };
+    }
 
-    // 1. Modo Aislar activo → siempre usa lógica 4D
-    // Resultado: modelo en blanco → elementos aparecen progresivamente al ejecutarse
-    if (isolateAssigned) return build4DColors();
+    // ── MODO ESTÁTICO (sin play) ──────────────────────────────────────────────
 
-    // 2. Planning Mode (sin simulación ni Aislar)
-    if (!isSimMode) {
-      const colors: ElementColor[] = [];
-      if (showAssigned) {
-        const inBasket = new Set(basket);
-        if (selectedIds.size > 0 && basket.length === 0) {
-          // Solo la(s) actividad(es) seleccionada(s)
-          visibleActs.forEach(act => {
-            if (!selectedIds.has(act.id)) return;
-            (links[act.id] ?? []).forEach(extId =>
-              colors.push({ externalId: extId, hex: '#22c55e', alpha: 0.95 })
-            );
-          });
-        } else {
-          // Todos los vinculados visibles
-          visibleActs.forEach(act => {
-            const actLinks = links[act.id] ?? [];
-            const isSel = selectedIds.has(act.id);
-            actLinks.forEach(extId => {
-              if (!inBasket.has(extId))
-                colors.push({ externalId: extId, hex: '#22c55e', alpha: isSel ? 0.92 : 0.6 });
-            });
-          });
-        }
+    // Checkbox activo → highlight naranja de los chequeados
+    if (checkedLinks.length > 0) {
+      if (isolateAssigned) {
+        const colors: ElementColor[] = checkedLinks.map(extId => ({
+          externalId: extId, hex: '#f97316', alpha: 0.99,
+        }));
+        applyBasket(colors);
+        return { elementColors: colors, doneIds: [] };
       }
-      basket.forEach(extId => {
-        const idx = colors.findIndex(c => c.externalId === extId);
-        const entry: ElementColor = { externalId: extId, hex: '#f59e0b', alpha: 0.98 };
-        if (idx >= 0) colors[idx] = entry; else colors.push(entry);
-      });
+      // Aislar OFF: todos verdes + chequeados naranjas encima
+      if (showAssigned) {
+        const colors: ElementColor[] = allLinkedIds.map(extId => ({
+          externalId: extId, hex: '#22c55e', alpha: 0.6,
+        }));
+        applyChecked(colors);
+        applyBasket(colors);
+        return { elementColors: colors, doneIds: [] };
+      }
+      const colors: ElementColor[] = [];
+      applyChecked(colors);
+      applyBasket(colors);
       return { elementColors: colors, doneIds: [] };
     }
 
-    // 3. 4D Simulation Mode (play / scrub)
-    return build4DColors();
-  }, [activities, links, currentDate, selectedId, selectedIds, isSimMode, weekStart, showAssigned, isolateAssigned, basket, discFilter]);
+    // Sin checkbox: Color ON → verde para todos | Color OFF → modelo vacío (nada construido)
+    if (showAssigned) {
+      const alpha = isolateAssigned ? 0.85 : 0.6;
+      const colors: ElementColor[] = allLinkedIds.map(extId => ({
+        externalId: extId, hex: '#22c55e', alpha,
+      }));
+      applyBasket(colors);
+      return { elementColors: colors, doneIds: [] };
+    } else {
+      // Color OFF + Aislar ON → modelo vacío (strictIsolate con assigned=[] → blank)
+      // Color OFF + Aislar OFF → modelo completo sin theming
+      return { elementColors: [], doneIds: [] };
+    }
+  }, [activities, links, currentDate, checkedLinks, showAssigned, isolateAssigned, basket, discFilter, is4DMode]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -777,7 +804,7 @@ export default function WeeklyPlanLayout() {
             onModelTreeReady={setTreeNodes}
             elementColors={elementColors}
             doneIds={doneIds}
-            globalGrey={isolateAssigned ? true : globalGrey}
+            globalGrey={isolateAssigned}
             strictIsolate={isolateAssigned}
             selection={chipSel ? [chipSel] : undefined}
             nodeFilterIds={Array.from(filterNodeIds)}
@@ -828,12 +855,6 @@ export default function WeeklyPlanLayout() {
                 )}
               </label>
 
-              {/* 4D Controls */}
-              <button onClick={() => setGlobalGrey(!globalGrey)} title="Toggle Ghost Mode"
-                className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] transition-colors border ${globalGrey ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/50' : 'bg-slate-700 text-slate-400 border-transparent hover:text-white'}`}>
-                <Ghost className="w-3.5 h-3.5" /> Ghost
-              </button>
-
               {/* ── Vinculados group ── */}
               <div className="flex items-center bg-slate-700/60 border border-slate-600 rounded overflow-hidden">
                 <span className="px-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-wide border-r border-slate-600 select-none">Vinc.</span>
@@ -858,20 +879,23 @@ export default function WeeklyPlanLayout() {
                     }
                   }}
                   title={assignedAreHidden ? 'Mostrar vinculados en el visor' : 'Ocultar vinculados del visor'}
-                  className={`flex items-center gap-1 px-1.5 py-0.5 text-[10px] transition-colors border-r border-slate-600
+                  className={`flex items-center gap-1 px-1.5 py-0.5 text-[10px] transition-colors
                     ${assignedAreHidden ? 'bg-red-500/20 text-red-300' : 'text-slate-500 hover:text-slate-200'}`}>
                   {assignedAreHidden ? '👁 Mostrar' : '🚫 Ocultar'}
                 </button>
-
-                {/* Aislar: mostrar SOLO los vinculados */}
-                <button
-                  onClick={() => setIsolateAssigned(p => !p)}
-                  title={isolateAssigned ? 'Desactivar aislamiento' : 'Aislar: mostrar solo elementos vinculados'}
-                  className={`flex items-center gap-1 px-1.5 py-0.5 text-[10px] transition-colors
-                    ${isolateAssigned ? 'bg-blue-500/25 text-blue-300' : 'text-slate-500 hover:text-slate-200'}`}>
-                  ⊞ Aislar
-                </button>
               </div>
+
+              {/* Aislar: ON = solo vinculados (ghost resto) | OFF = modelo completo */}
+              <button
+                onClick={() => setIsolateAssigned(p => !p)}
+                title={isolateAssigned ? 'Mostrar modelo completo' : 'Aislar: mostrar solo elementos vinculados'}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-semibold transition-all border
+                  ${isolateAssigned
+                    ? 'bg-blue-600 text-white border-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]'
+                    : 'bg-slate-700 text-slate-300 border-slate-500 hover:bg-slate-600 hover:text-white'}`}>
+                <Ghost className="w-3.5 h-3.5" />
+                Aislar
+              </button>
 
               <div className="w-px h-4 bg-slate-600 mx-1" />
 
@@ -1115,29 +1139,37 @@ export default function WeeklyPlanLayout() {
                     {/* ── Main data + Gantt row (same height, same flex) ── */}
                     <div
                       className={`flex border-b border-slate-100 cursor-pointer transition-colors
-                        ${isPrimary ? 'bg-blue-100' : isSelected ? 'bg-blue-50' : idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}
+                        ${isSelected ? 'bg-blue-100' : idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}
                         ${draggedId === act.id ? 'opacity-40' : ''}
                         hover:bg-blue-50/50`}
                       style={{ height: ROW_H }}
                       onClick={() => {
                         if (isPrimary && isEditing) return;
-                        if (multiSelect) {
-                          setSelectedIds(prev => {
-                            const n = new Set(prev);
-                            n.has(act.id) ? n.delete(act.id) : n.add(act.id);
-                            return n;
-                          });
-                          setSelectedId(act.id);
+                        // Click en fila = toggle checkbox, siempre
+                        const isChecked = selectedIds.has(act.id);
+                        if (isChecked) {
+                          // Deseleccionar
+                          setSelectedIds(prev => { const n = new Set(prev); n.delete(act.id); return n; });
+                          if (selectedId === act.id) {
+                            setSelectedId(null);
+                            setEditDraft(null);
+                            setIsNew(false);
+                          }
                         } else {
+                          // Seleccionar
+                          if (!multiSelect) {
+                            // Sin multi: reemplaza selección
+                            setSelectedIds(new Set([act.id]));
+                          } else {
+                            setSelectedIds(prev => { const n = new Set(prev); n.add(act.id); return n; });
+                          }
                           setSelectedId(act.id);
-                          setSelectedIds(new Set([act.id]));
+                          setChipSel(null);
+                          setIsNew(false);
+                          setEditDraft(null);
+                          const actLinks = links[act.id];
+                          if (actLinks?.length) viewerApiRef.current?.zoomToElements(actLinks);
                         }
-                        setChipSel(null);
-                        setIsNew(false);
-                        setEditDraft(null);
-                        // Auto-zoom al modelo cuando la actividad tiene elementos vinculados
-                        const actLinks = links[act.id];
-                        if (actLinks?.length) viewerApiRef.current?.zoomToElements(actLinks);
                       }}>
 
                       {/* ── Left data column ── */}
@@ -1145,30 +1177,15 @@ export default function WeeklyPlanLayout() {
                         className="group shrink-0 flex items-center px-1 border-r border-slate-200 relative"
                         style={{ width: 440, borderLeft: `3px solid ${color}` }}>
 
-                        {/* Multi-select checkbox — visible solo cuando Multi está activo */}
-                        {multiSelect && (
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.has(act.id)}
-                            onChange={ev => {
-                              ev.stopPropagation();
-                              const adding = !selectedIds.has(act.id);
-                              setSelectedIds(prev => {
-                                const n = new Set(prev);
-                                adding ? n.add(act.id) : n.delete(act.id);
-                                return n;
-                              });
-                              if (adding) {
-                                setSelectedId(act.id);
-                                const actLinks = links[act.id];
-                                if (actLinks?.length) viewerApiRef.current?.zoomToElements(actLinks);
-                              }
-                            }}
-                            onClick={ev => ev.stopPropagation()}
-                            className="shrink-0 mr-1 accent-blue-500 cursor-pointer w-3 h-3"
-                            title="Seleccionar actividad"
-                          />
-                        )}
+                        {/* Checkbox — siempre visible, sincronizado con click de fila */}
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(act.id)}
+                          onChange={ev => ev.stopPropagation()}
+                          onClick={ev => ev.stopPropagation()}
+                          className="shrink-0 mr-1 accent-blue-500 cursor-pointer w-3 h-3"
+                          title="Seleccionar actividad"
+                        />
 
                         {/* Drag handle + link badge */}
                         <div className="flex shrink-0 items-center justify-center w-8 mr-1 text-slate-300 group-hover:text-slate-500 cursor-grab active:cursor-grabbing">

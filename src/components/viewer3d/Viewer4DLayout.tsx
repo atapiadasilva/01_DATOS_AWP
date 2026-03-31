@@ -73,10 +73,13 @@ function fmtShort(d: Date): string {
   return d.toLocaleDateString('es-CL', { day: '2-digit', month: 'short' });
 }
 
+// Parse ISO date string as local midnight (avoids UTC off-by-one in non-UTC zones)
+function toLocalDate(s: string): Date { return new Date(s + 'T00:00:00'); }
+
 function getStatus(task: Task4D, current: Date): Status4D {
   if (!task.start || !task.end) return 'not-started';
-  const s = new Date(task.start);
-  const e = new Date(task.end);
+  const s = toLocalDate(task.start);
+  const e = toLocalDate(task.end);
   if (task.progress >= 100) return 'complete';
   if (current < s) return 'not-started';
   if (current > e) return 'late';
@@ -143,7 +146,7 @@ export default function Viewer4DLayout() {
   const [editDraft,    setEditDraft]    = useState<Partial<Task4D> | null>(null);
   const [globalGrey,   setGlobalGrey]   = useState(true);
   const [saving,       setSaving]       = useState(false);
-  
+
   const dragRef = useRef<{
     edt: string; type: 'move' | 'start' | 'end'; startX: number;
     origStart: string; origEnd: string; curStart: string; curEnd: string;
@@ -151,28 +154,38 @@ export default function Viewer4DLayout() {
 
   const { projStart, totalPx, months, todayPx } = useGanttGeometry(tasks);
 
-  // ── Fetch tasks ───────────────────────────────────────────────────────────
+  // ── Reset on project change: clear stale URN + tasks ─────────────────────
   useEffect(() => {
+    setModelUrn('');
+    setTasks([]);
+    setCollapsed({});
+    setActiveTask(null);
+    setEditDraft(null);
+  }, [currentProject?.id]);
+
+  // ── Fetch tasks (only when model URN is known) ────────────────────────────
+  useEffect(() => {
+    if (!modelUrn) return; // wait for viewer to report the active model URN
     setLoading(true);
     const params = new URLSearchParams();
     if (currentProject?.id) params.set('projectId', currentProject.id);
-    if (modelUrn)            params.set('modelUrn', modelUrn);
+    params.set('modelUrn', modelUrn);
     fetch(`/api/aps/wbs-linked?${params}`)
       .then(r => r.json())
       .then(data => {
         if (!Array.isArray(data)) return;
         setTasks(data);
-        // Collapse summary tasks (level < 3) if they have children
+        // Collapse summary tasks (level < 2) if they have children
         const init: Record<string, boolean> = {};
         data.forEach((t: Task4D) => {
           if (t.hasChildren && t.level < 2) init[t.edt] = true;
         });
         setCollapsed(init);
-        // Start date at project start
+        // Set current date to project start
         const allDates = data
           .flatMap((t: Task4D) => [t.start, t.end])
           .filter((s: string | null): s is string => !!s)
-          .map((s: string) => new Date(s).getTime());
+          .map((s: string) => new Date(s + 'T00:00:00').getTime());
         if (allDates.length) setCurrentDate(new Date(Math.min(...allDates)));
       })
       .catch(console.error)

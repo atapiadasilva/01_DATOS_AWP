@@ -70,6 +70,12 @@ export default function WeeklyPlan4DLayout() {
   const [currentDate, setCurrentDate] = useState<Date>(() => new Date());
   const [globalGrey,  setGlobalGrey]  = useState(true);
 
+  // ── Reset on project change ───────────────────────────────────────────────
+  useEffect(() => {
+    setModelUrn('');
+    setActivities([]);
+  }, [currentProject?.id]);
+
   // ── Load activities + links ────────────────────────────────────────────────
   const loadAll = useCallback(async () => {
     if (!currentProject?.id) return;
