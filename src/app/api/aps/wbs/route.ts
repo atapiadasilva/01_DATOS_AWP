@@ -19,6 +19,7 @@ const DEFAULTS = {
   wbs_col_duration:      'Duración',
   wbs_col_discipline:    'Disciplina',
   wbs_col_cwp:           null as string | null,
+  wbs_col_hh:            null as string | null,
 };
 
 function excelToIso(serial: any): string | null {
@@ -72,6 +73,7 @@ export async function GET(req: NextRequest) {
         wbs_col_duration:      settings.wbs_col_duration      || DEFAULTS.wbs_col_duration,
         wbs_col_discipline:    settings.wbs_col_discipline     || DEFAULTS.wbs_col_discipline,
         wbs_col_cwp:           settings.wbs_col_cwp           || null,
+        wbs_col_hh:            settings.wbs_col_hh            || null,
       };
       debugLogs.push(`Using project settings (entity: "${cfg.wbs_entity_name}")`);
     }
@@ -120,6 +122,7 @@ export async function GET(req: NextRequest) {
       duration:   d[cfg.wbs_col_duration] ?? '',
       discipline: d[cfg.wbs_col_discipline] ?? '',
       cwp:        cfg.wbs_col_cwp ? (d[cfg.wbs_col_cwp] ?? '') : undefined,
+      hh:         cfg.wbs_col_hh  ? (parseFloat(d[cfg.wbs_col_hh]) || 0)   : 0,
     };
   });
 
@@ -134,5 +137,5 @@ export async function GET(req: NextRequest) {
     ),
   }));
 
-  return NextResponse.json({ debug: debugLogs, tasks: result });
+  return NextResponse.json({ debug: debugLogs, tasks: result, entityName: cfg.wbs_entity_name });
 }

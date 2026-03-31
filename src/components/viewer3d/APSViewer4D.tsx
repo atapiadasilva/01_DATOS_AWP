@@ -79,6 +79,18 @@ const APSViewer4D = forwardRef<APSViewer4DHandle, APSViewer4DProps>(function APS
   // Signature of last applied state — skip if unchanged to prevent flicker
   const lastAppliedSigRef = useRef<string>('');
 
+  // ResizeObserver: notify Forge when container size changes (panel open/close, drag)
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      const viewer = viewerRef.current;
+      if (viewer) viewer.resize();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const [sdkReady,    setSdkReady]    = useState(false);
   const [viewerReady, setViewerReady] = useState(false);
   const [status,      setStatus]      = useState('Inicializando Viewer…');

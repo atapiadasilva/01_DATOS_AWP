@@ -46,7 +46,7 @@ export async function PUT(req: NextRequest) {
     'wbs_entity_name',
     'wbs_col_edt', 'wbs_col_name', 'wbs_col_start', 'wbs_col_end',
     'wbs_col_baseline_start', 'wbs_col_baseline_end',
-    'wbs_col_progress', 'wbs_col_duration', 'wbs_col_discipline', 'wbs_col_cwp',
+    'wbs_col_progress', 'wbs_col_duration', 'wbs_col_discipline', 'wbs_col_cwp', 'wbs_col_hh',
     'setup_completed', 'setup_step',
   ];
 

@@ -159,7 +159,6 @@ export default function WeeklyPlanLayout() {
   const [basket,    setBasket]    = useState<string[]>([]); // accumulated for linking
   const [chipSel,      setChipSel]      = useState<string | null>(null); // chip clicked → select in viewer
   const [showChips,    setShowChips]    = useState(false);              // toggle chip panel
-  const [pendingRemove, setPendingRemove] = useState<Set<string>>(new Set()); // marked for removal
   const basketRef      = useRef<string[]>([]);               // always-fresh basket for linkElements
   const activitiesRef  = useRef<Activity[]>([]);             // always-fresh ref for drag save
   const linkedSetRef   = useRef<Set<string>>(new Set());     // always-fresh for handleViewerSelection
@@ -472,43 +471,31 @@ export default function WeeklyPlanLayout() {
   // Sync linkedSetRef for use in handleViewerSelection (avoids stale closure)
   useEffect(() => { linkedSetRef.current = linkedSet; }, [linkedSet]);
   // Reset chip UI when selected activity changes
-  useEffect(() => { setChipSel(null); setShowChips(false); setPendingRemove(new Set()); }, [selectedId]);
+  useEffect(() => { setChipSel(null); setShowChips(false); }, [selectedId]);
   // basket items that are ALREADY linked → Desvincular
   const basketLinked = useMemo(() => basket.filter(id => linkedSet.has(id)), [basket, linkedSet]);
   // basket items NOT yet linked → Vincular
   const basketNew    = useMemo(() => basket.filter(id => !linkedSet.has(id)), [basket, linkedSet]);
 
-  // Marcar / desmarcar un chip para eliminación (no borra hasta confirmar)
-  const togglePending = useCallback((extId: string) => {
-    setPendingRemove(p => {
-      const n = new Set(p);
-      n.has(extId) ? n.delete(extId) : n.add(extId);
-      return n;
-    });
-  }, []);
-
-  // Confirmar eliminación de todos los chips marcados
-  const savePendingRemovals = useCallback(async () => {
-    if (!selectedId || pendingRemove.size === 0) return;
-    const toRemove = Array.from(pendingRemove);
+  // Eliminar un vínculo inmediatamente al hacer clic en X del chip
+  const removeSingleLink = useCallback(async (actId: string, extId: string) => {
     setSaving(true);
     try {
       const res = await fetch('/api/weekly-plan/links', {
         method:  'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ activityId: selectedId, externalIds: toRemove }),
+        body:    JSON.stringify({ activityId: actId, externalIds: [extId] }),
       });
-      if (!res.ok) { console.error('[savePendingRemovals]', await res.json()); return; }
+      if (!res.ok) { console.error('[removeSingleLink]', await res.json()); return; }
       setLinks(p => ({
         ...p,
-        [selectedId]: (p[selectedId] ?? []).filter(id => !toRemove.includes(id)),
+        [actId]: (p[actId] ?? []).filter(id => id !== extId),
       }));
-      setPendingRemove(new Set());
-      setChipSel(null);
+      if (chipSel === extId) setChipSel(null);
     } finally {
       setSaving(false);
     }
-  }, [selectedId, pendingRemove]);
+  }, [chipSel]);
 
   // Desvincular SOLO los elementos del basket que ya están vinculados a la actividad.
   const unlinkSpecific = useCallback(async () => {
@@ -588,14 +575,13 @@ export default function WeeklyPlanLayout() {
   const allAssignedSet  = useMemo(() => new Set(allAssignedIds), [allAssignedIds]);
   const assignedAreHidden = allAssignedIds.length > 0 && allAssignedIds.every(id => hiddenIds.includes(id));
 
-  // IDs de elementos vinculados a las actividades chequeadas (solo cuando multiSelect ON)
-  // El row-click (selectedId) NO afecta al viewer — solo sirve para el panel de edición
+  // IDs de elementos vinculados a las actividades chequeadas
   const checkedLinks = useMemo(() => {
-    if (!multiSelect || selectedIds.size === 0) return [];
+    if (selectedIds.size === 0) return [];
     const ids: string[] = [];
     selectedIds.forEach(actId => ids.push(...(links[actId] ?? [])));
     return ids;
-  }, [multiSelect, selectedIds, links]);
+  }, [selectedIds, links]);
 
   // Solo el Play activa el modo 4D progresivo — el scrubbing manual mantiene vista estática
   const is4DMode = playing;
@@ -626,70 +612,44 @@ export default function WeeklyPlanLayout() {
       visibleActs.flatMap(act => links[act.id] ?? [])
     ));
 
-    // ── MODO 4D (Play o scrub activo) ────────────────────────────────────────
-    // Progresivo: elementos aparecen conforme avanza la fecha
+    // ── Paso 1: construir base de colores según modo ─────────────────────────
+    const colors: ElementColor[] = [];
+    const done: string[] = [];
+
     if (is4DMode) {
-      const colors: ElementColor[] = [];
-      const done: string[] = [];
+      // 4D progresivo: solo elementos cuya actividad ya inició
       visibleActs.forEach(act => {
         const st = getStatus(act, currentDate);
-        if (st === 'not-started') return; // aún no aparece
+        if (st === 'not-started') return;
         const actLinks = links[act.id] ?? [];
-        if (!showAssigned) {
-          // Color OFF: visible con color original
-          done.push(...actLinks);
-        } else {
-          // Color ON: verde progresivo
+        if (showAssigned) {
           actLinks.forEach(extId => colors.push({ externalId: extId, hex: '#22c55e', alpha: 0.85 }));
+        } else {
+          done.push(...actLinks);
         }
       });
-      applyChecked(colors);
-      applyBasket(colors);
-      // En Aislar ON: strictIsolate hace que los no-asignados queden ghosteados
-      // colors vacío al inicio → modelo vacío (strictIsolate)
-      return { elementColors: colors, doneIds: done };
-    }
-
-    // ── MODO ESTÁTICO (sin play) ──────────────────────────────────────────────
-
-    // Checkbox activo → highlight naranja de los chequeados
-    if (checkedLinks.length > 0) {
-      if (isolateAssigned) {
-        const colors: ElementColor[] = checkedLinks.map(extId => ({
-          externalId: extId, hex: '#f97316', alpha: 0.99,
-        }));
-        applyBasket(colors);
-        return { elementColors: colors, doneIds: [] };
-      }
-      // Aislar OFF: todos verdes + chequeados naranjas encima
-      if (showAssigned) {
-        const colors: ElementColor[] = allLinkedIds.map(extId => ({
-          externalId: extId, hex: '#22c55e', alpha: 0.6,
-        }));
-        applyChecked(colors);
-        applyBasket(colors);
-        return { elementColors: colors, doneIds: [] };
-      }
-      const colors: ElementColor[] = [];
-      applyChecked(colors);
-      applyBasket(colors);
-      return { elementColors: colors, doneIds: [] };
-    }
-
-    // Sin checkbox: Color ON → verde para todos | Color OFF → modelo vacío (nada construido)
-    if (showAssigned) {
-      const alpha = isolateAssigned ? 0.85 : 0.6;
-      const colors: ElementColor[] = allLinkedIds.map(extId => ({
-        externalId: extId, hex: '#22c55e', alpha,
-      }));
-      applyBasket(colors);
-      return { elementColors: colors, doneIds: [] };
     } else {
-      // Color OFF + Aislar ON → modelo vacío (strictIsolate con assigned=[] → blank)
-      // Color OFF + Aislar OFF → modelo completo sin theming
-      return { elementColors: [], doneIds: [] };
+      // Estático: si Aislar ON + actividades chequeadas → solo sus vinculados; si no, todos
+      const idsToShow = (isolateAssigned && selectedIds.size > 0)
+        ? new Set(checkedLinks)
+        : null;
+      if (showAssigned) {
+        const alpha = isolateAssigned ? 0.85 : 0.6;
+        allLinkedIds.forEach(extId => {
+          if (!idsToShow || idsToShow.has(extId))
+            colors.push({ externalId: extId, hex: '#22c55e', alpha });
+        });
+      } else if (idsToShow && idsToShow.size > 0) {
+        // Aislar ON + sin color verde → incluir chequeados como visibles (no greyed)
+        idsToShow.forEach(extId => colors.push({ externalId: extId, hex: '#94a3b8', alpha: 0.8 }));
+      }
     }
-  }, [activities, links, currentDate, checkedLinks, showAssigned, isolateAssigned, basket, discFilter, is4DMode]);
+
+    // ── Paso 2: naranja SIEMPRE encima para los chequeados ────────────────────
+    applyChecked(colors);
+    applyBasket(colors);
+    return { elementColors: colors, doneIds: done };
+  }, [activities, links, currentDate, checkedLinks, selectedIds, showAssigned, isolateAssigned, basket, discFilter, is4DMode]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -1138,51 +1098,38 @@ export default function WeeklyPlanLayout() {
 
                     {/* ── Main data + Gantt row (same height, same flex) ── */}
                     <div
-                      className={`flex border-b border-slate-100 cursor-pointer transition-colors
+                      className={`flex border-b border-slate-100 transition-colors
                         ${isSelected ? 'bg-blue-100' : idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}
                         ${draggedId === act.id ? 'opacity-40' : ''}
                         hover:bg-blue-50/50`}
-                      style={{ height: ROW_H }}
-                      onClick={() => {
-                        if (isPrimary && isEditing) return;
-                        // Click en fila = toggle checkbox, siempre
-                        const isChecked = selectedIds.has(act.id);
-                        if (isChecked) {
-                          // Deseleccionar
-                          setSelectedIds(prev => { const n = new Set(prev); n.delete(act.id); return n; });
-                          if (selectedId === act.id) {
-                            setSelectedId(null);
-                            setEditDraft(null);
-                            setIsNew(false);
-                          }
-                        } else {
-                          // Seleccionar
-                          if (!multiSelect) {
-                            // Sin multi: reemplaza selección
-                            setSelectedIds(new Set([act.id]));
-                          } else {
-                            setSelectedIds(prev => { const n = new Set(prev); n.add(act.id); return n; });
-                          }
-                          setSelectedId(act.id);
-                          setChipSel(null);
-                          setIsNew(false);
-                          setEditDraft(null);
-                          const actLinks = links[act.id];
-                          if (actLinks?.length) viewerApiRef.current?.zoomToElements(actLinks);
-                        }
-                      }}>
+                      style={{ height: ROW_H }}>
 
                       {/* ── Left data column ── */}
                       <div
                         className="group shrink-0 flex items-center px-1 border-r border-slate-200 relative"
                         style={{ width: 440, borderLeft: `3px solid ${color}` }}>
 
-                        {/* Checkbox — siempre visible, sincronizado con click de fila */}
+                        {/* Checkbox — única forma de seleccionar */}
                         <input
                           type="checkbox"
                           checked={selectedIds.has(act.id)}
-                          onChange={ev => ev.stopPropagation()}
-                          onClick={ev => ev.stopPropagation()}
+                          onChange={() => {}}
+                          onClick={ev => {
+                            ev.stopPropagation();
+                            const isChecked = selectedIds.has(act.id);
+                            if (isChecked) {
+                              setSelectedIds(prev => { const n = new Set(prev); n.delete(act.id); return n; });
+                              if (selectedId === act.id) { setSelectedId(null); setEditDraft(null); setIsNew(false); }
+                            } else {
+                              setSelectedIds(prev => { const n = new Set(prev); n.add(act.id); return n; });
+                              setSelectedId(act.id);
+                              setChipSel(null);
+                              setIsNew(false);
+                              setEditDraft(null);
+                              const actLinks = links[act.id];
+                              if (actLinks?.length) viewerApiRef.current?.zoomToElements(actLinks);
+                            }
+                          }}
                           className="shrink-0 mr-1 accent-blue-500 cursor-pointer w-3 h-3"
                           title="Seleccionar actividad"
                         />
@@ -1360,48 +1307,32 @@ export default function WeeklyPlanLayout() {
                           <span className="text-[9px] font-bold text-emerald-700 uppercase tracking-wide">
                             {linkCount} elemento{linkCount !== 1 ? 's' : ''} vinculado{linkCount !== 1 ? 's' : ''}
                           </span>
-                          {pendingRemove.size > 0 && (
-                            <span className="text-[9px] text-red-500 font-semibold">· {pendingRemove.size} por eliminar</span>
-                          )}
                         </div>
 
                         {/* Chip panel */}
                         {showChips && (
                           <div className="flex items-center flex-wrap gap-1 px-2 py-1.5 bg-emerald-50 border-b border-emerald-200">
                             {(links[act.id] ?? []).map(extId => {
-                              const isChipActive  = chipSel === extId;
-                              const isPending     = pendingRemove.has(extId);
+                              const isChipActive = chipSel === extId;
                               return (
                                 <span key={extId}
                                   onClick={ev => { ev.stopPropagation(); setChipSel(isChipActive ? null : extId); }}
                                   title={extId}
                                   className={`flex items-center gap-0.5 shrink-0 rounded px-1.5 py-0.5 text-[9px] font-mono cursor-pointer transition-colors
-                                    ${isPending
-                                      ? 'bg-red-100 border border-red-400 text-red-700 line-through opacity-70'
-                                      : isChipActive
-                                        ? 'bg-amber-400 border border-amber-500 text-white font-bold shadow-sm'
-                                        : 'bg-emerald-100 border border-emerald-300 text-emerald-800 hover:bg-emerald-200'}`}>
+                                    ${isChipActive
+                                      ? 'bg-amber-400 border border-amber-500 text-white font-bold shadow-sm'
+                                      : 'bg-emerald-100 border border-emerald-300 text-emerald-800 hover:bg-emerald-200'}`}>
                                   <span>{extId.length > 12 ? `…${extId.slice(-10)}` : extId}</span>
                                   <button
-                                    onClick={ev => { ev.stopPropagation(); togglePending(extId); }}
-                                    title={isPending ? 'Desmarcar' : 'Marcar para eliminar'}
-                                    className={`ml-0.5 transition-colors leading-none ${isPending ? 'text-red-500 hover:text-red-700' : 'text-emerald-400 hover:text-red-500'}`}>
+                                    onClick={ev => { ev.stopPropagation(); removeSingleLink(act.id, extId); }}
+                                    disabled={saving}
+                                    title="Eliminar vínculo"
+                                    className="ml-0.5 text-emerald-400 hover:text-red-500 transition-colors leading-none disabled:opacity-40">
                                     <X className="w-2.5 h-2.5" />
                                   </button>
                                 </span>
                               );
                             })}
-
-                            {/* Save removal button */}
-                            {pendingRemove.size > 0 && (
-                              <button
-                                onClick={ev => { ev.stopPropagation(); savePendingRemovals(); }}
-                                disabled={saving}
-                                className="flex items-center gap-1 shrink-0 px-2 py-0.5 rounded bg-red-500 hover:bg-red-400 text-white text-[9px] font-bold transition-colors disabled:opacity-50">
-                                {saving ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Trash2 className="w-2.5 h-2.5" />}
-                                Eliminar {pendingRemove.size}
-                              </button>
-                            )}
                           </div>
                         )}
                       </>

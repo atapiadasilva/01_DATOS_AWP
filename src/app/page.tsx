@@ -204,16 +204,17 @@ export default function Home() {
           </h2>
         </header>
 
-        <div className="flex-1 overflow-y-auto relative">
+        <div className="flex-1 overflow-hidden relative flex flex-col">
           {activeTab === 'cwp-dashboard' && (
-            <CwpDashboard 
-              projectId={projectId || ''} 
-              entities={entities} 
-              customViews={customViews} 
+            <CwpDashboard
+              projectId={projectId || ''}
+              entities={entities}
+              customViews={customViews}
             />
           )}
-          
+
           {activeTab === 'upload' && (
+            <div className="h-full overflow-y-auto">
             <div className="p-10 max-w-xl mx-auto space-y-6">
                <div className="bg-white p-10 rounded-[2.5rem] border border-brand-cloud shadow-2xl text-center">
                   <div className="w-16 h-16 bg-brand-deep/5 rounded-2xl flex items-center justify-center mx-auto mb-6">
@@ -250,6 +251,7 @@ export default function Home() {
                     </div>
                   )}
                </div>
+            </div>
             </div>
           )}
 
@@ -298,8 +300,8 @@ export default function Home() {
           {activeTab === 'sot' && <SourceOfTruth entities={entities} projectId={projectId} />}
           {activeTab === 'programming' && <GanttChart />}
           {activeTab === 'scheduler' && <CWPMatcher programData={[]} cwpGroups={{}} projectId={projectId} onMappingsChange={() => {}} />}
-          {activeTab === 'settings' && <RolesManager />}
-          {activeTab === 'platform-admin' && <PlatformAdmin />}
+          {activeTab === 'settings' && <div className="h-full overflow-y-auto"><RolesManager /></div>}
+          {activeTab === 'platform-admin' && <div className="h-full overflow-y-auto"><PlatformAdmin /></div>}
           {activeTab === 'viewer3d' && <APSViewer />}
           {activeTab === 'viewer3d-wbs' && <ViewerWBSLayout />}
           {activeTab === 'viewer4d' && <Viewer4DLayout />}
